@@ -1,22 +1,40 @@
-import { CodeVerifier } from '../src/engine';
-import { LLMFormatter } from '../src/formatter/llm-formatter';
-import { formatSARIF } from '../src/formatter/sarif';
-import { ALL_RULES } from '../src/rules/react-native-rules';
-import { RULE_REGISTRY, validateRuleRegistry } from '../src/rules/registry';
-import { classifyESLintExit, classifyNpmAuditExit, summarizeESLintOutput, summarizeNpmAuditOutput } from '../src/project-checks';
-import { ProjectSummaryIndex } from '../src/abstract-interpreter/project-summaries';
-import * as path from 'path';
-import { IntervalDomain, MemoryState, NullabilityDomain } from '../src/abstract-interpreter/domain';
-import { MemoryAbstractState } from '../src/types/verifier';
-import { diagnosticFingerprint, loadBaseline, writeBaseline } from '../src/baseline';
-import { loadConfig } from '../src/config';
-import * as fs from 'fs';
-import * as os from 'os';
-import { SemanticAnalysisIndex } from '../src/semantic-analysis';
-import { verifyMobileConfigs } from '../src/mobile-config';
-import { verifyDeploymentConfigs } from '../src/deployment-config';
-import { verifyNativeConsistency } from '../src/native-consistency';
-import { fileCacheKey, mapWithConcurrency, projectSignature, ScanCache } from '../src/scan-cache';
+import { CodeVerifier } from "../src/engine";
+import { LLMFormatter } from "../src/formatter/llm-formatter";
+import { formatSARIF } from "../src/formatter/sarif";
+import { ALL_RULES } from "../src/rules/react-native-rules";
+import { RULE_REGISTRY, validateRuleRegistry } from "../src/rules/registry";
+import {
+  classifyESLintExit,
+  classifyNpmAuditExit,
+  summarizeESLintOutput,
+  summarizeNpmAuditOutput,
+} from "../src/project-checks";
+import { ProjectSummaryIndex } from "../src/abstract-interpreter/project-summaries";
+import * as path from "path";
+import {
+  IntervalDomain,
+  MemoryState,
+  NullabilityDomain,
+} from "../src/abstract-interpreter/domain";
+import { MemoryAbstractState } from "../src/types/verifier";
+import {
+  diagnosticFingerprint,
+  loadBaseline,
+  writeBaseline,
+} from "../src/baseline";
+import { loadConfig } from "../src/config";
+import * as fs from "fs";
+import * as os from "os";
+import { SemanticAnalysisIndex } from "../src/semantic-analysis";
+import { verifyMobileConfigs } from "../src/mobile-config";
+import { verifyDeploymentConfigs } from "../src/deployment-config";
+import { verifyNativeConsistency } from "../src/native-consistency";
+import {
+  fileCacheKey,
+  mapWithConcurrency,
+  projectSignature,
+  ScanCache,
+} from "../src/scan-cache";
 
 let passedCount = 0;
 let failedCount = 0;
@@ -38,14 +56,22 @@ const verifier = new CodeVerifier();
 async function expectFinding(code: string, ruleId: string, label: string) {
   const res = await verifier.verifyCode(code, `${label}.tsx`);
   const has = res.diagnostics.some((d) => d.ruleId === ruleId);
-  assert(has, label, `expected ${ruleId}, got [${res.diagnostics.map((d) => d.ruleId).join(', ') || 'none'}]`);
+  assert(
+    has,
+    label,
+    `expected ${ruleId}, got [${res.diagnostics.map((d) => d.ruleId).join(", ") || "none"}]`,
+  );
 }
 
 /** Expects verification to pass with zero blocking issues. */
 async function expectClean(code: string, label: string) {
   const res = await verifier.verifyCode(code, `${label}.tsx`);
-  const blocking = res.diagnostics.filter((d) => d.severity !== 'INFO');
-  assert(res.passed, label, `expected clean, got: ${blocking.map((d) => `${d.ruleId}@L${d.loc.start.line}`).join(', ') || 'none'}`);
+  const blocking = res.diagnostics.filter((d) => d.severity !== "INFO");
+  assert(
+    res.passed,
+    label,
+    `expected clean, got: ${blocking.map((d) => `${d.ruleId}@L${d.loc.start.line}`).join(", ") || "none"}`,
+  );
 }
 
 async function expectNoFinding(code: string, ruleId: string, label: string) {
@@ -53,163 +79,276 @@ async function expectNoFinding(code: string, ruleId: string, label: string) {
   assert(
     !res.diagnostics.some((d) => d.ruleId === ruleId),
     label,
-    `expected no ${ruleId}, got [${res.diagnostics.map((d) => d.ruleId).join(', ') || 'none'}]`
+    `expected no ${ruleId}, got [${res.diagnostics.map((d) => d.ruleId).join(", ") || "none"}]`,
   );
 }
 
 async function runTests() {
-  console.log('🧪 Running Code Verifier Test Suite...\n');
+  console.log("🧪 Running Code Verifier Test Suite...\n");
 
-  console.log('— SAST Rules: Detection');
-  await expectFinding(`
+  console.log("— SAST Rules: Detection");
+  await expectFinding(
+    `
     export async function saveAuth(token: string) {
       await AsyncStorage.setItem('auth_token', token);
     }
-  `, 'RN-SEC-001', 'Detects insecure AsyncStorage usage for auth_token');
+  `,
+    "RN-SEC-001",
+    "Detects insecure AsyncStorage usage for auth_token",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     export function Article({ userContent }: { userContent: string }) {
       return <WebView source={{ html: userContent }} />;
     }
-  `, 'RN-SEC-002', 'Detects dynamic HTML injection into WebView');
+  `,
+    "RN-SEC-002",
+    "Detects dynamic HTML injection into WebView",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     export function Screen({ src }: { src: string }) {
       return <WebView injectedJavaScript={src} />;
     }
-  `, 'RN-SEC-002', 'Detects dynamic injectedJavaScript in WebView');
+  `,
+    "RN-SEC-002",
+    "Detects dynamic injectedJavaScript in WebView",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     export function Counter() {
       const [count, setCount] = useState(0);
       useEffect(() => { setCount(count + 1); });
       return <div>{count}</div>;
     }
-  `, 'REACT-001', 'Detects infinite re-render loop in useEffect');
+  `,
+    "REACT-001",
+    "Detects infinite re-render loop in useEffect",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     export function Profile({ isVip }: { isVip: boolean }) {
       if (isVip) { const [discount] = useState(20); }
       return <div>Profile</div>;
     }
-  `, 'REACT-002', 'Detects conditional React Hook call');
+  `,
+    "REACT-002",
+    "Detects conditional React Hook call",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     export function Profile({ isVip }: { isVip: boolean }) {
       isVip && useState(20);
       return <div>Profile</div>;
     }
-  `, 'REACT-002', 'Detects hook call behind logical AND');
+  `,
+    "REACT-002",
+    "Detects hook call behind logical AND",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     const API_KEY = "sk_live_938491823091823091823091";
     export function fetchPay() {}
-  `, 'SEC-003', 'Detects hardcoded Stripe live key');
+  `,
+    "SEC-003",
+    "Detects hardcoded Stripe live key",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     const token = "ghp_9aQbRcSdTeUfVgWhXiJyKzLmNoPqRsTuVw";
     export function fetch() {}
-  `, 'SEC-003', 'Detects hardcoded GitHub PAT');
+  `,
+    "SEC-003",
+    "Detects hardcoded GitHub PAT",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     const AWS_KEY = "AKIAIOSFODNN7EXAMPLE";
     export function s3() {}
-  `, 'SEC-003', 'Detects hardcoded AWS access key');
+  `,
+    "SEC-003",
+    "Detects hardcoded AWS access key",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     const cfg = { apiKey: "sk_test_938491823091823091823" };
     export function pay() {}
-  `, 'SEC-003', 'Detects secret in object literal');
+  `,
+    "SEC-003",
+    "Detects secret in object literal",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function run() { eval(userInput); }
-  `, 'SEC-004', 'Detects eval() usage');
+  `,
+    "SEC-004",
+    "Detects eval() usage",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function run() { new Function('return 1')(); }
-  `, 'SEC-004', 'Detects new Function() usage');
+  `,
+    "SEC-004",
+    "Detects new Function() usage",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     export function Article({ body }: any) {
       return <div dangerouslySetInnerHTML={{ __html: body }} />;
     }
-  `, 'SEC-005', 'Detects dynamic dangerouslySetInnerHTML');
+  `,
+    "SEC-005",
+    "Detects dynamic dangerouslySetInnerHTML",
+  );
 
-  await expectClean(`
+  await expectClean(
+    `
     import DOMPurify from 'dompurify';
     export function Article({ body }: any) {
       return <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(body) }} />;
     }
-  `, 'Clean: DOMPurify-sanitized inner HTML');
+  `,
+    "Clean: DOMPurify-sanitized inner HTML",
+  );
 
-  await expectClean(`
+  await expectClean(
+    `
     import { sanitizeHtml } from './lib/sanitize';
     export function Article({ body }: any) {
       return <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(body) || 'No content' }} />;
     }
-  `, 'Clean: sanitizer wrapper with import provenance');
+  `,
+    "Clean: sanitizer wrapper with import provenance",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     import { sanitizeHtml } from './lib/sanitize';
     export function Article({ body, fallback }: any) {
       return <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(body) || fallback }} />;
     }
-  `, 'SEC-005', 'Detects unsanitized dynamic fallback branch');
+  `,
+    "SEC-005",
+    "Detects unsanitized dynamic fallback branch",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function sanitizeHtml(value: string) { return value; }
     export function Article({ body }: any) {
       return <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(body) }} />;
     }
-  `, 'SEC-005', 'Does not trust an arbitrary local sanitizer name');
+  `,
+    "SEC-005",
+    "Does not trust an arbitrary local sanitizer name",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     export function save(token: string) {
       localStorage.setItem('auth_token', token);
     }
-  `, 'SEC-006', 'Detects token in web localStorage');
+  `,
+    "SEC-006",
+    "Detects token in web localStorage",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     export function Browser() {
       return <WebView source={{ uri: 'https://example.com' }} allowUniversalAccessFromFileURLs />;
     }
-  `, 'RN-SEC-003', 'Detects universal WebView file access');
-  await expectFinding(`<WebView source={{ uri }} mixedContentMode="always" />`, 'RN-SEC-003',
-    'Detects always-allow WebView mixed content');
-  await expectNoFinding(`<WebView source={{ uri }} allowUniversalAccessFromFileURLs={false} mixedContentMode="never" />`,
-    'RN-SEC-003', 'Secure WebView settings are clean');
-  await expectNoFinding(`<WebView source={{ html: '<p>safe</p>' }} originWhitelist={['*']} />`,
-    'RN-SEC-003', 'Required static-HTML origin whitelist is not misclassified');
+  `,
+    "RN-SEC-003",
+    "Detects universal WebView file access",
+  );
+  await expectFinding(
+    `<WebView source={{ uri }} mixedContentMode="always" />`,
+    "RN-SEC-003",
+    "Detects always-allow WebView mixed content",
+  );
+  await expectNoFinding(
+    `<WebView source={{ uri }} allowUniversalAccessFromFileURLs={false} mixedContentMode="never" />`,
+    "RN-SEC-003",
+    "Secure WebView settings are clean",
+  );
+  await expectNoFinding(
+    `<WebView source={{ html: '<p>safe</p>' }} originWhitelist={['*']} />`,
+    "RN-SEC-003",
+    "Required static-HTML origin whitelist is not misclassified",
+  );
 
-  await expectFinding(`frame.contentWindow.postMessage(payload, '*');`, 'WEB-002',
-    'Detects wildcard browser postMessage origin');
-  await expectNoFinding(`frame.contentWindow.postMessage(payload, 'https://trusted.example');`, 'WEB-002',
-    'Exact postMessage origin is clean');
-  await expectNoFinding(`webViewRef.current.postMessage(payload);`, 'WEB-002',
-    'React Native WebView one-argument postMessage is clean');
+  await expectFinding(
+    `frame.contentWindow.postMessage(payload, '*');`,
+    "WEB-002",
+    "Detects wildcard browser postMessage origin",
+  );
+  await expectNoFinding(
+    `frame.contentWindow.postMessage(payload, 'https://trusted.example');`,
+    "WEB-002",
+    "Exact postMessage origin is clean",
+  );
+  await expectNoFinding(
+    `webViewRef.current.postMessage(payload);`,
+    "WEB-002",
+    "React Native WebView one-argument postMessage is clean",
+  );
 
-  await expectFinding(`const agent = new https.Agent({ rejectUnauthorized: false });`, 'NET-002',
-    'Detects disabled TLS certificate verification');
-  await expectFinding(`process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';`, 'NET-002',
-    'Detects process-wide TLS verification override');
-  await expectNoFinding(`const agent = new https.Agent({ rejectUnauthorized: true });`, 'NET-002',
-    'Enabled TLS certificate verification is clean');
-  await expectNoFinding(`const display = { rejectUnauthorized: false };`, 'NET-002',
-    'Unrelated object property is not treated as TLS configuration');
+  await expectFinding(
+    `const agent = new https.Agent({ rejectUnauthorized: false });`,
+    "NET-002",
+    "Detects disabled TLS certificate verification",
+  );
+  await expectFinding(
+    `process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';`,
+    "NET-002",
+    "Detects process-wide TLS verification override",
+  );
+  await expectNoFinding(
+    `const agent = new https.Agent({ rejectUnauthorized: true });`,
+    "NET-002",
+    "Enabled TLS certificate verification is clean",
+  );
+  await expectNoFinding(
+    `const display = { rejectUnauthorized: false };`,
+    "NET-002",
+    "Unrelated object property is not treated as TLS configuration",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function Clock() {
       useEffect(() => { const id = setInterval(tick, 1000); }, []);
       return null;
     }
-  `, 'REACT-003', 'Detects interval created by effect without cleanup');
-  await expectFinding(`
+  `,
+    "REACT-003",
+    "Detects interval created by effect without cleanup",
+  );
+  await expectFinding(
+    `
     function Online() {
       useEffect(() => { window.addEventListener('online', refresh); }, []);
       return null;
     }
-  `, 'REACT-003', 'Detects event listener created by effect without cleanup');
-  await expectNoFinding(`
+  `,
+    "REACT-003",
+    "Detects event listener created by effect without cleanup",
+  );
+  await expectNoFinding(
+    `
     function Clock() {
       useEffect(() => {
         const id = setInterval(tick, 1000);
@@ -217,155 +356,366 @@ async function runTests() {
       }, []);
       return null;
     }
-  `, 'REACT-003', 'Effect interval with cleanup is clean');
-  await expectNoFinding(`
+  `,
+    "REACT-003",
+    "Effect interval with cleanup is clean",
+  );
+  await expectNoFinding(
+    `
     function Online() {
       useEffect(() => { window.addEventListener('online', refresh, { once: true }); }, []);
       return null;
     }
-  `, 'REACT-003', 'One-shot effect listener does not require explicit cleanup');
+  `,
+    "REACT-003",
+    "One-shot effect listener does not require explicit cleanup",
+  );
 
-  await expectFinding(`function run(req: any) { const command = ` + "`ls ${req.query.dir}`" + `; exec(command); }`,
-    'SEC-007', 'Detects request input in shell command');
-  await expectNoFinding(`exec('npm run build');`, 'SEC-007', 'Static shell command is clean');
+  await expectFinding(
+    `function run(req: any) { const command = ` +
+      "`ls ${req.query.dir}`" +
+      `; exec(command); }`,
+    "SEC-007",
+    "Detects request input in shell command",
+  );
+  await expectNoFinding(
+    `exec('npm run build');`,
+    "SEC-007",
+    "Static shell command is clean",
+  );
 
-  await expectFinding(`function find(req: any) { const sql = ` + "`SELECT * FROM users WHERE id = ${req.params.id}`" + `; db.query(sql); }`,
-    'SEC-008', 'Detects request input interpolated into SQL');
-  await expectNoFinding(`db.query('SELECT * FROM users WHERE id = ?', [userId]);`, 'SEC-008',
-    'Parameterized SQL is clean');
+  await expectFinding(
+    `function find(req: any) { const sql = ` +
+      "`SELECT * FROM users WHERE id = ${req.params.id}`" +
+      `; db.query(sql); }`,
+    "SEC-008",
+    "Detects request input interpolated into SQL",
+  );
+  await expectNoFinding(
+    `db.query('SELECT * FROM users WHERE id = ?', [userId]);`,
+    "SEC-008",
+    "Parameterized SQL is clean",
+  );
 
-  await expectFinding(`async function proxy(req: any) { return fetch(req.query.url); }`, 'SEC-009',
-    'Detects request-controlled outbound URL');
-  await expectNoFinding(`fetch('https://api.example.com/status');`, 'SEC-009', 'Static outbound URL is clean');
+  await expectFinding(
+    `async function proxy(req: any) { return fetch(req.query.url); }`,
+    "SEC-009",
+    "Detects request-controlled outbound URL",
+  );
+  await expectNoFinding(
+    `fetch('https://api.example.com/status');`,
+    "SEC-009",
+    "Static outbound URL is clean",
+  );
 
-  await expectFinding(`function download(req: any) { return fs.readFile(req.params.path, done); }`, 'SEC-010',
-    'Detects request-controlled filesystem path');
-  await expectNoFinding(`fs.readFile('/srv/app/config.json', done);`, 'SEC-010', 'Static filesystem path is clean');
+  await expectFinding(
+    `function download(req: any) { return fs.readFile(req.params.path, done); }`,
+    "SEC-010",
+    "Detects request-controlled filesystem path",
+  );
+  await expectNoFinding(
+    `fs.readFile('/srv/app/config.json', done);`,
+    "SEC-010",
+    "Static filesystem path is clean",
+  );
 
-  await expectFinding(`function generatePassword() { return Math.random().toString(36); }`, 'SEC-011',
-    'Detects weak random password generation');
-  await expectFinding(`function hashPassword(value: string) { return crypto.createHash('sha1').update(value).digest('hex'); }`,
-    'SEC-011', 'Detects weak hash in password context');
-  await expectNoFinding(`function randomColor() { return Math.random(); }`, 'SEC-011',
-    'Non-security random value is clean');
+  await expectFinding(
+    `function generatePassword() { return Math.random().toString(36); }`,
+    "SEC-011",
+    "Detects weak random password generation",
+  );
+  await expectFinding(
+    `function hashPassword(value: string) { return crypto.createHash('sha1').update(value).digest('hex'); }`,
+    "SEC-011",
+    "Detects weak hash in password context",
+  );
+  await expectNoFinding(
+    `function randomColor() { return Math.random(); }`,
+    "SEC-011",
+    "Non-security random value is clean",
+  );
 
-  await expectFinding(`function merge(req: any, target: any) { const key = req.body.key; target[key] = req.body.value; }`,
-    'SEC-012', 'Detects request-controlled object key write');
-  await expectNoFinding(`target['displayName'] = value;`, 'SEC-012', 'Static object key write is clean');
+  await expectFinding(
+    `function merge(req: any, target: any) { const key = req.body.key; target[key] = req.body.value; }`,
+    "SEC-012",
+    "Detects request-controlled object key write",
+  );
+  await expectNoFinding(
+    `target['displayName'] = value;`,
+    "SEC-012",
+    "Static object key write is clean",
+  );
 
-  await expectFinding(`function login(password: string) { console.log('login attempt', password); }`, 'SEC-013',
-    'Detects password written to console logs');
-  await expectFinding(`logger.info({ userId, accessToken });`, 'SEC-013',
-    'Detects token nested in structured logs');
-  await expectNoFinding(`logger.info({ userId, event: 'login-success' });`, 'SEC-013',
-    'Non-sensitive authentication event logging is clean');
-  await expectNoFinding(`console.log('password validation failed');`, 'SEC-013',
-    'Sensitive words in static log messages are not treated as leaked values');
+  await expectFinding(
+    `function login(password: string) { console.log('login attempt', password); }`,
+    "SEC-013",
+    "Detects password written to console logs",
+  );
+  await expectFinding(
+    `logger.info({ userId, accessToken });`,
+    "SEC-013",
+    "Detects token nested in structured logs",
+  );
+  await expectNoFinding(
+    `logger.info({ userId, event: 'login-success' });`,
+    "SEC-013",
+    "Non-sensitive authentication event logging is clean",
+  );
+  await expectNoFinding(
+    `console.log('password validation failed');`,
+    "SEC-013",
+    "Sensitive words in static log messages are not treated as leaked values",
+  );
 
-  await expectFinding(`function authenticate(token: string) { return jwt.decode(token); }`, 'SEC-014',
-    'Detects authentication JWT decoded without verification');
-  await expectFinding(`function middleware(req: any) { return jwt.decode(req.headers.authorization); }`, 'SEC-014',
-    'Detects request JWT decoded without verification');
-  await expectNoFinding(`function authenticate(token: string) { return jwt.verify(token, publicKey, { algorithms: ['RS256'] }); }`,
-    'SEC-014', 'Verified JWT is clean');
-  await expectNoFinding(`function inspectFixture(value: string) { return jwt.decode(value); }`, 'SEC-014',
-    'Non-authentication JWT inspection is not assumed to establish trust');
+  await expectFinding(
+    `function authenticate(token: string) { return jwt.decode(token); }`,
+    "SEC-014",
+    "Detects authentication JWT decoded without verification",
+  );
+  await expectFinding(
+    `function middleware(req: any) { return jwt.decode(req.headers.authorization); }`,
+    "SEC-014",
+    "Detects request JWT decoded without verification",
+  );
+  await expectNoFinding(
+    `function authenticate(token: string) { return jwt.verify(token, publicKey, { algorithms: ['RS256'] }); }`,
+    "SEC-014",
+    "Verified JWT is clean",
+  );
+  await expectNoFinding(
+    `function inspectFixture(value: string) { return jwt.decode(value); }`,
+    "SEC-014",
+    "Non-authentication JWT inspection is not assumed to establish trust",
+  );
 
-  await expectFinding(`async function create(req: any) { return User.create(req.body); }`, 'SEC-015',
-    'Detects direct request-body mass assignment');
-  await expectFinding(`async function update(req: any) { const changes = req.body; return User.updateOne({ id: req.params.id }, changes); }`,
-    'SEC-015', 'Detects aliased request-body mass assignment');
-  await expectFinding(`function patch(req: any, user: any) { Object.assign(user, { ...req.body }); }`, 'SEC-015',
-    'Detects spread request-body mass assignment');
-  await expectNoFinding(`async function create(req: any) { const dto = { name: req.body.name, email: req.body.email }; return User.create(dto); }`,
-    'SEC-015', 'Allowlisted persistence DTO is clean');
+  await expectFinding(
+    `async function create(req: any) { return User.create(req.body); }`,
+    "SEC-015",
+    "Detects direct request-body mass assignment",
+  );
+  await expectFinding(
+    `async function update(req: any) { const changes = req.body; return User.updateOne({ id: req.params.id }, changes); }`,
+    "SEC-015",
+    "Detects aliased request-body mass assignment",
+  );
+  await expectFinding(
+    `function patch(req: any, user: any) { Object.assign(user, { ...req.body }); }`,
+    "SEC-015",
+    "Detects spread request-body mass assignment",
+  );
+  await expectNoFinding(
+    `async function create(req: any) { const dto = { name: req.body.name, email: req.body.email }; return User.create(dto); }`,
+    "SEC-015",
+    "Allowlisted persistence DTO is clean",
+  );
 
-  await expectFinding(`res.cookie('session', value);`, 'SEC-016',
-    'Detects session cookie without security attributes');
-  await expectFinding(`res.cookie('refresh_token', value, { secure: false, httpOnly: true, sameSite: 'none' });`, 'SEC-016',
-    'Detects explicitly insecure refresh cookie');
-  await expectNoFinding(`res.cookie('session', value, { secure: true, httpOnly: true, sameSite: 'strict' });`, 'SEC-016',
-    'Hardened session cookie is clean');
-  await expectNoFinding(`res.cookie('theme', 'dark');`, 'SEC-016',
-    'Non-sensitive preference cookie is clean');
+  await expectFinding(
+    `res.cookie('session', value);`,
+    "SEC-016",
+    "Detects session cookie without security attributes",
+  );
+  await expectFinding(
+    `res.cookie('refresh_token', value, { secure: false, httpOnly: true, sameSite: 'none' });`,
+    "SEC-016",
+    "Detects explicitly insecure refresh cookie",
+  );
+  await expectNoFinding(
+    `res.cookie('session', value, { secure: true, httpOnly: true, sameSite: 'strict' });`,
+    "SEC-016",
+    "Hardened session cookie is clean",
+  );
+  await expectNoFinding(
+    `res.cookie('theme', 'dark');`,
+    "SEC-016",
+    "Non-sensitive preference cookie is clean",
+  );
 
-  await expectFinding(`app.use(cors({ origin: true, credentials: true }));`, 'SEC-017',
-    'Detects reflected origin with credentialed CORS');
-  await expectFinding(`app.use(cors({ origin: '*', credentials: true }));`, 'SEC-017',
-    'Detects wildcard origin with credentialed CORS');
-  await expectNoFinding(`app.use(cors({ origin: 'https://app.example.com', credentials: true }));`, 'SEC-017',
-    'Exact credentialed CORS origin is clean');
-  await expectNoFinding(`app.use(cors({ origin: '*', credentials: false }));`, 'SEC-017',
-    'Public non-credentialed CORS is not misclassified');
+  await expectFinding(
+    `app.use(cors({ origin: true, credentials: true }));`,
+    "SEC-017",
+    "Detects reflected origin with credentialed CORS",
+  );
+  await expectFinding(
+    `app.use(cors({ origin: '*', credentials: true }));`,
+    "SEC-017",
+    "Detects wildcard origin with credentialed CORS",
+  );
+  await expectNoFinding(
+    `app.use(cors({ origin: 'https://app.example.com', credentials: true }));`,
+    "SEC-017",
+    "Exact credentialed CORS origin is clean",
+  );
+  await expectNoFinding(
+    `app.use(cors({ origin: '*', credentials: false }));`,
+    "SEC-017",
+    "Public non-credentialed CORS is not misclassified",
+  );
 
-  console.log('— Logic and Async Correctness');
-  await expectFinding(`let ready = false; if (ready = initialize()) start();`, 'LOGIC-001',
-    'Detects assignment used as an if condition');
-  await expectNoFinding(`let ready = false; ready = initialize(); if (ready === true) start();`, 'LOGIC-001',
-    'Separated assignment and comparison are clean');
-  await expectFinding(`const names = users.map(user => { user.name; });`, 'LOGIC-002',
-    'Detects map callback with missing return');
-  await expectFinding(`const active = users.filter(user => { check(user); });`, 'LOGIC-002',
-    'Detects filter callback with missing return');
-  await expectNoFinding(`const names = users.map(user => { return user.name; });`, 'LOGIC-002',
-    'Returning map callback is clean');
-  await expectNoFinding(`users.forEach(user => { notify(user); });`, 'LOGIC-002',
-    'Side-effecting forEach callback does not require a return');
-  await expectFinding(`async function saveAll(items: Item[]) { items.forEach(async item => { await save(item); }); }`,
-    'ASYNC-001', 'Detects async forEach callback');
-  await expectNoFinding(`async function saveAll(items: Item[]) { await Promise.all(items.map(async item => save(item))); }`,
-    'ASYNC-001', 'Awaited Promise.all map is clean');
-  await expectFinding(`const task = new Promise(async resolve => { resolve(await load()); });`, 'ASYNC-002',
-    'Detects async Promise executor');
-  await expectNoFinding(`const task = new Promise((resolve, reject) => { load().then(resolve, reject); });`, 'ASYNC-002',
-    'Synchronous Promise executor is clean');
+  console.log("— Logic and Async Correctness");
+  await expectFinding(
+    `let ready = false; if (ready = initialize()) start();`,
+    "LOGIC-001",
+    "Detects assignment used as an if condition",
+  );
+  await expectNoFinding(
+    `let ready = false; ready = initialize(); if (ready === true) start();`,
+    "LOGIC-001",
+    "Separated assignment and comparison are clean",
+  );
+  await expectFinding(
+    `const names = users.map(user => { user.name; });`,
+    "LOGIC-002",
+    "Detects map callback with missing return",
+  );
+  await expectFinding(
+    `const active = users.filter(user => { check(user); });`,
+    "LOGIC-002",
+    "Detects filter callback with missing return",
+  );
+  await expectNoFinding(
+    `const names = users.map(user => { return user.name; });`,
+    "LOGIC-002",
+    "Returning map callback is clean",
+  );
+  await expectNoFinding(
+    `users.forEach(user => { notify(user); });`,
+    "LOGIC-002",
+    "Side-effecting forEach callback does not require a return",
+  );
+  await expectFinding(
+    `async function saveAll(items: Item[]) { items.forEach(async item => { await save(item); }); }`,
+    "ASYNC-001",
+    "Detects async forEach callback",
+  );
+  await expectNoFinding(
+    `async function saveAll(items: Item[]) { await Promise.all(items.map(async item => save(item))); }`,
+    "ASYNC-001",
+    "Awaited Promise.all map is clean",
+  );
+  await expectFinding(
+    `const task = new Promise(async resolve => { resolve(await load()); });`,
+    "ASYNC-002",
+    "Detects async Promise executor",
+  );
+  await expectNoFinding(
+    `const task = new Promise((resolve, reject) => { load().then(resolve, reject); });`,
+    "ASYNC-002",
+    "Synchronous Promise executor is clean",
+  );
 
-  console.log('— React and React Native Correctness');
-  await expectFinding(`function Screen() { useEffect(async () => { await load(); }, []); return null; }`, 'REACT-004',
-    'Detects async useEffect setup');
-  await expectNoFinding(`function Screen() { useEffect(() => { async function run() { await load(); } run(); }, []); return null; }`,
-    'REACT-004', 'Inner async Effect operation is clean');
-  await expectFinding(`function List({ items }) { return items.map((item, index) => <Row key={index} item={item} />); }`,
-    'REACT-005', 'Detects array index used as React key');
-  await expectNoFinding(`function List({ items }) { return items.map(item => <Row key={item.id} item={item} />); }`,
-    'REACT-005', 'Stable React item key is clean');
-  await expectFinding(`function Counter() { const [count, setCount] = useState(0); useEffect(() => { const id = setInterval(() => setCount(count + 1), 1000); return () => clearInterval(id); }, []); return count; }`,
-    'REACT-006', 'Detects stale state captured by Effect timer');
-  await expectNoFinding(`function Counter() { const [count, setCount] = useState(0); useEffect(() => { const id = setInterval(() => setCount(current => current + 1), 1000); return () => clearInterval(id); }, []); return count; }`,
-    'REACT-006', 'Functional timer state update is clean');
-  await expectFinding(`function RideMap() { const pulse = useRef(new Animated.Value(1)).current; useEffect(() => { pulse.addListener(() => {}); }, [pulse]); return null; }`,
-    'REACT-007', 'Detects useRef(...).current read at render top level');
-  await expectFinding(`function Screen() { const rows = useRef(null); if (rows.current) return <View />; return null; }`,
-    'REACT-007', 'Detects ref.current read in a render branch');
-  await expectNoFinding(`function Screen() { const rows = useRef(null); useEffect(() => { if (rows.current) scroll(); }, []); return <Pressable onPress={() => rows.current?.focus()} />; }`,
-    'REACT-007', 'Effect and event-handler ref access is clean');
-  await expectNoFinding(`function Screen() { const box = { current: 5 }; return <Text>{box.current}</Text>; }`,
-    'REACT-007', 'Plain object current field is not treated as a ref');
-  await expectFinding(`function RideView() { const [pickup, setPickup] = useState(DEFAULT_PICKUP); return null; }`,
-    'REACT-008', 'Detects useState value that is never read');
-  await expectFinding(`function RideView() { const [pickup, setPickup] = useState(DEFAULT_PICKUP); return <Text>{pickup.name}</Text>; }`,
-    'REACT-008', 'Detects state whose setter is never called');
-  await expectNoFinding(`export function RideView() { const [pickup, setPickup] = useState(DEFAULT_PICKUP); useEffect(() => setPickup(place), [place]); return <Text>{pickup.name}</Text>; }`,
-    'HYG-002', 'State value read in JSX and setter called — both rules stay quiet');
-  await expectNoFinding(`function RideView() { const [_draft] = useState(null); return null; }`,
-    'REACT-008', 'Underscore-prefixed state is treated as intentionally unused');
-  await expectFinding(`function save() { const leftover = compute(); return 1; }`,
-    'HYG-002', 'Detects unused local declaration');
-  await expectFinding(`function save() { let total; total = compute(); return 1; }`,
-    'HYG-002', 'Detects variable assigned but never read');
-  await expectNoFinding(`export const MAX = 5; export function useThing() { return MAX; }`,
-    'HYG-002', 'Exported declarations are exempt');
-  await expectFinding(`export const Screen: any = () => { const handleExit = useCallback(() => {}, []); return null; }`,
-    'HYG-002', 'Detects unused callback nested inside an exported component');
-  await expectFinding(`export const Screen: any = () => { function deadHelper() { return 1; } return null; }`,
-    'HYG-002', 'Detects dead nested helper inside an exported component');
-  await expectNoFinding(`export const Screen: any = () => { const handleExit = useCallback(() => {}, []); return <Pressable onPress={handleExit} />; }`,
-    'HYG-002', 'Handler referenced from JSX is used');
-  await expectFinding(`function Feed({ items }) { return <FlatList data={items} keyExtractor={(item, index) => String(index)} renderItem={renderItem} />; }`,
-    'RN-COR-001', 'Detects FlatList index key extractor');
-  await expectNoFinding(`function Feed({ items }) { return <FlatList data={items} keyExtractor={item => item.id} renderItem={renderItem} />; }`,
-    'RN-COR-001', 'Stable FlatList key extractor is clean');
-  await expectFinding(`
+  console.log("— React and React Native Correctness");
+  await expectFinding(
+    `function Screen() { useEffect(async () => { await load(); }, []); return null; }`,
+    "REACT-004",
+    "Detects async useEffect setup",
+  );
+  await expectNoFinding(
+    `function Screen() { useEffect(() => { async function run() { await load(); } run(); }, []); return null; }`,
+    "REACT-004",
+    "Inner async Effect operation is clean",
+  );
+  await expectFinding(
+    `function List({ items }) { return items.map((item, index) => <Row key={index} item={item} />); }`,
+    "REACT-005",
+    "Detects array index used as React key",
+  );
+  await expectNoFinding(
+    `function List({ items }) { return items.map(item => <Row key={item.id} item={item} />); }`,
+    "REACT-005",
+    "Stable React item key is clean",
+  );
+  await expectFinding(
+    `function Counter() { const [count, setCount] = useState(0); useEffect(() => { const id = setInterval(() => setCount(count + 1), 1000); return () => clearInterval(id); }, []); return count; }`,
+    "REACT-006",
+    "Detects stale state captured by Effect timer",
+  );
+  await expectNoFinding(
+    `function Counter() { const [count, setCount] = useState(0); useEffect(() => { const id = setInterval(() => setCount(current => current + 1), 1000); return () => clearInterval(id); }, []); return count; }`,
+    "REACT-006",
+    "Functional timer state update is clean",
+  );
+  await expectFinding(
+    `function RideMap() { const pulse = useRef(new Animated.Value(1)).current; useEffect(() => { pulse.addListener(() => {}); }, [pulse]); return null; }`,
+    "REACT-007",
+    "Detects useRef(...).current read at render top level",
+  );
+  await expectFinding(
+    `function Screen() { const rows = useRef(null); if (rows.current) return <View />; return null; }`,
+    "REACT-007",
+    "Detects ref.current read in a render branch",
+  );
+  await expectNoFinding(
+    `function Screen() { const rows = useRef(null); useEffect(() => { if (rows.current) scroll(); }, []); return <Pressable onPress={() => rows.current?.focus()} />; }`,
+    "REACT-007",
+    "Effect and event-handler ref access is clean",
+  );
+  await expectNoFinding(
+    `function Screen() { const box = { current: 5 }; return <Text>{box.current}</Text>; }`,
+    "REACT-007",
+    "Plain object current field is not treated as a ref",
+  );
+  await expectFinding(
+    `function RideView() { const [pickup, setPickup] = useState(DEFAULT_PICKUP); return null; }`,
+    "REACT-008",
+    "Detects useState value that is never read",
+  );
+  await expectFinding(
+    `function RideView() { const [pickup, setPickup] = useState(DEFAULT_PICKUP); return <Text>{pickup.name}</Text>; }`,
+    "REACT-008",
+    "Detects state whose setter is never called",
+  );
+  await expectNoFinding(
+    `export function RideView() { const [pickup, setPickup] = useState(DEFAULT_PICKUP); useEffect(() => setPickup(place), [place]); return <Text>{pickup.name}</Text>; }`,
+    "HYG-002",
+    "State value read in JSX and setter called — both rules stay quiet",
+  );
+  await expectNoFinding(
+    `function RideView() { const [_draft] = useState(null); return null; }`,
+    "REACT-008",
+    "Underscore-prefixed state is treated as intentionally unused",
+  );
+  await expectFinding(
+    `function save() { const leftover = compute(); return 1; }`,
+    "HYG-002",
+    "Detects unused local declaration",
+  );
+  await expectFinding(
+    `function save() { let total; total = compute(); return 1; }`,
+    "HYG-002",
+    "Detects variable assigned but never read",
+  );
+  await expectNoFinding(
+    `export const MAX = 5; export function useThing() { return MAX; }`,
+    "HYG-002",
+    "Exported declarations are exempt",
+  );
+  await expectFinding(
+    `export const Screen: any = () => { const handleExit = useCallback(() => {}, []); return null; }`,
+    "HYG-002",
+    "Detects unused callback nested inside an exported component",
+  );
+  await expectFinding(
+    `export const Screen: any = () => { function deadHelper() { return 1; } return null; }`,
+    "HYG-002",
+    "Detects dead nested helper inside an exported component",
+  );
+  await expectNoFinding(
+    `export const Screen: any = () => { const handleExit = useCallback(() => {}, []); return <Pressable onPress={handleExit} />; }`,
+    "HYG-002",
+    "Handler referenced from JSX is used",
+  );
+  await expectFinding(
+    `function Feed({ items }) { return <FlatList data={items} keyExtractor={(item, index) => String(index)} renderItem={renderItem} />; }`,
+    "RN-COR-001",
+    "Detects FlatList index key extractor",
+  );
+  await expectNoFinding(
+    `function Feed({ items }) { return <FlatList data={items} keyExtractor={item => item.id} renderItem={renderItem} />; }`,
+    "RN-COR-001",
+    "Stable FlatList key extractor is clean",
+  );
+  await expectFinding(
+    `
     import { Animated } from 'react-native';
     export function animate(fade: Animated.Value, slide: Animated.Value) {
       Animated.parallel([
@@ -373,15 +723,23 @@ async function runTests() {
         Animated.timing(slide, { toValue: 600, duration: 250, useNativeDriver: false }),
       ]).start();
     }
-  `, 'RN-COR-002', 'Detects mixed useNativeDriver inside Animated.parallel');
-  await expectFinding(`
+  `,
+    "RN-COR-002",
+    "Detects mixed useNativeDriver inside Animated.parallel",
+  );
+  await expectFinding(
+    `
     import { Animated } from 'react-native';
     export function play(value: Animated.Value) {
       const fade = Animated.timing(value, { toValue: 1, duration: 200, useNativeDriver: true });
       Animated.sequence([fade, Animated.spring(value, { toValue: 0, useNativeDriver: false })]).start();
     }
-  `, 'RN-COR-002', 'Detects mixed drivers through named animation variables in sequence');
-  await expectClean(`
+  `,
+    "RN-COR-002",
+    "Detects mixed drivers through named animation variables in sequence",
+  );
+  await expectClean(
+    `
     import { Animated } from 'react-native';
     export function animate(fade: Animated.Value, slide: Animated.Value) {
       Animated.parallel([
@@ -389,8 +747,11 @@ async function runTests() {
         Animated.timing(slide, { toValue: 600, duration: 250, useNativeDriver: false }),
       ]).start();
     }
-  `, 'Uniform JS-driven Animated.parallel is clean');
-  await expectNoFinding(`
+  `,
+    "Uniform JS-driven Animated.parallel is clean",
+  );
+  await expectNoFinding(
+    `
     import { Animated } from 'react-native';
     export function animate(fade: Animated.Value, slide: Animated.Value, native: boolean) {
       Animated.parallel([
@@ -398,8 +759,12 @@ async function runTests() {
         Animated.timing(slide, { toValue: 600, duration: 250, useNativeDriver: false }),
       ]).start();
     }
-  `, 'RN-COR-002', 'Non-literal useNativeDriver value is not reported');
-  await expectFinding(`
+  `,
+    "RN-COR-002",
+    "Non-literal useNativeDriver value is not reported",
+  );
+  await expectFinding(
+    `
     import { useRef } from 'react';
     export function useSheet(onClose: () => void) {
       const busy = useRef(false);
@@ -414,8 +779,12 @@ async function runTests() {
       };
       return runDismiss;
     }
-  `, 'RN-COR-003', 'Detects animation latch cleared only on the finished path');
-  await expectNoFinding(`
+  `,
+    "RN-COR-003",
+    "Detects animation latch cleared only on the finished path",
+  );
+  await expectNoFinding(
+    `
     import { useRef } from 'react';
     export function useSheet() {
       const busy = useRef(false);
@@ -429,8 +798,12 @@ async function runTests() {
       };
       return run;
     }
-  `, 'RN-COR-003', 'Latch also cleared on the interruption path is clean');
-  await expectNoFinding(`
+  `,
+    "RN-COR-003",
+    "Latch also cleared on the interruption path is clean",
+  );
+  await expectNoFinding(
+    `
     import { useRef } from 'react';
     export function useSheet() {
       const busy = useRef(false);
@@ -443,8 +816,12 @@ async function runTests() {
       };
       return run;
     }
-  `, 'RN-COR-003', 'Latch cleared before the finished check is clean');
-  await expectNoFinding(`
+  `,
+    "RN-COR-003",
+    "Latch cleared before the finished check is clean",
+  );
+  await expectNoFinding(
+    `
     import { useRef } from 'react';
     export function once(done: () => void) {
       const fired = useRef(false);
@@ -458,8 +835,12 @@ async function runTests() {
       };
       return run;
     }
-  `, 'RN-COR-003', 'One-shot latch without any reset is not reported');
-  await expectNoFinding(`
+  `,
+    "RN-COR-003",
+    "One-shot latch without any reset is not reported",
+  );
+  await expectNoFinding(
+    `
     let busy = false;
     export function run() {
       if (busy) return;
@@ -469,135 +850,241 @@ async function runTests() {
         busy = false;
       });
     }
-  `, 'RN-COR-003', 'Plain boolean flag is not reported as an animation latch');
-  await expectFinding(`
+  `,
+    "RN-COR-003",
+    "Plain boolean flag is not reported as an animation latch",
+  );
+  await expectFinding(
+    `
     import { PanResponder } from 'react-native';
     export const makeResponder = () => PanResponder.create({
       onStartShouldSetPanResponderCapture: () => true,
       onMoveShouldSetPanResponder: () => false,
     });
-  `, 'RN-COR-004', 'Detects constant-true capture-phase pan responder');
-  await expectNoFinding(`
+  `,
+    "RN-COR-004",
+    "Detects constant-true capture-phase pan responder",
+  );
+  await expectNoFinding(
+    `
     import { PanResponder } from 'react-native';
     export const makeResponder = () => PanResponder.create({
       onStartShouldSetPanResponderCapture: (_, gesture) => gesture.dy > 2,
     });
-  `, 'RN-COR-004', 'Conditional capture-phase pan responder is clean');
+  `,
+    "RN-COR-004",
+    "Conditional capture-phase pan responder is clean",
+  );
 
-  console.log('— Reliability and Code Quality');
-  await expectFinding(`try { await save(); } catch (error) {}`, 'REL-001', 'Detects empty catch block');
-  await expectNoFinding(`try { await save(); } catch (error) { logger.error(error); throw error; }`, 'REL-001',
-    'Handled and rethrown error is clean');
-  await expectNoFinding(`try { await vibrate(); } catch { /* graceful fallback on unsupported devices */ }`, 'REL-001',
-    'Documented best-effort catch is clean');
-  await expectFinding(`function value() { try { return compute(); } finally { return fallback; } }`, 'REL-002',
-    'Detects return that overrides completion in finally');
-  await expectNoFinding(`function value() { try { return compute(); } finally { cleanup(); } }`, 'REL-002',
-    'Cleanup-only finally is clean');
-  await expectFinding(`function value() { return 1; console.log('never'); }`, 'LOGIC-003',
-    'Detects unreachable statement after return');
-  await expectNoFinding(`function value(flag: boolean) { if (flag) return 1; console.log('reachable'); return 2; }`,
-    'LOGIC-003', 'Statement after conditional return remains reachable');
-  await expectFinding(`items.map(item => process(item));`, 'QUAL-001', 'Detects ignored map result');
-  await expectNoFinding(`const processed = items.map(item => process(item));`, 'QUAL-001',
-    'Consumed map result is clean');
+  console.log("— Reliability and Code Quality");
+  await expectFinding(
+    `try { await save(); } catch (error) {}`,
+    "REL-001",
+    "Detects empty catch block",
+  );
+  await expectNoFinding(
+    `try { await save(); } catch (error) { logger.error(error); throw error; }`,
+    "REL-001",
+    "Handled and rethrown error is clean",
+  );
+  await expectNoFinding(
+    `try { await vibrate(); } catch { /* graceful fallback on unsupported devices */ }`,
+    "REL-001",
+    "Documented best-effort catch is clean",
+  );
+  await expectFinding(
+    `function value() { try { return compute(); } finally { return fallback; } }`,
+    "REL-002",
+    "Detects return that overrides completion in finally",
+  );
+  await expectNoFinding(
+    `function value() { try { return compute(); } finally { cleanup(); } }`,
+    "REL-002",
+    "Cleanup-only finally is clean",
+  );
+  await expectFinding(
+    `function value() { return 1; console.log('never'); }`,
+    "LOGIC-003",
+    "Detects unreachable statement after return",
+  );
+  await expectNoFinding(
+    `function value(flag: boolean) { if (flag) return 1; console.log('reachable'); return 2; }`,
+    "LOGIC-003",
+    "Statement after conditional return remains reachable",
+  );
+  await expectFinding(
+    `items.map(item => process(item));`,
+    "QUAL-001",
+    "Detects ignored map result",
+  );
+  await expectNoFinding(
+    `const processed = items.map(item => process(item));`,
+    "QUAL-001",
+    "Consumed map result is clean",
+  );
 
-  console.log('— Backend and API Correctness');
-  await expectFinding(`try { await load(); } catch (error) { res.status(500).json({ error: error.message }); }`, 'API-001',
-    'Detects raw exception detail returned to clients');
-  await expectNoFinding(`catch (error) { logger.error(error); res.status(500).json({ error: 'Internal error' }); }`, 'API-001',
-    'Generic public API error is clean');
-  await expectFinding(`res.status(200).json({ error: 'User not found' });`, 'API-002',
-    'Detects error payload with success status');
-  await expectNoFinding(`res.status(404).json({ error: 'User not found' });`, 'API-002',
-    'Error payload with failure status is clean');
-  await expectFinding(`function handler(req, res) { if (!req.user) { res.status(401).json({ error: 'Unauthorized' }); } res.json(secret); }`,
-    'API-003', 'Detects execution continuing after conditional response');
-  await expectNoFinding(`function handler(req, res) { if (!req.user) { return res.status(401).json({ error: 'Unauthorized' }); } res.json(secret); }`,
-    'API-003', 'Returned conditional response is clean');
-  await expectFinding(`app.get('/admin/users', (req, res) => res.json(users));`, 'AUTH-001',
-    'Detects admin route without middleware');
-  await expectNoFinding(`app.get('/admin/users', requireAuth, requireAdmin, (req, res) => res.json(users));`, 'AUTH-001',
-    'Admin route with authorization middleware is clean');
+  console.log("— Backend and API Correctness");
+  await expectFinding(
+    `try { await load(); } catch (error) { res.status(500).json({ error: error.message }); }`,
+    "API-001",
+    "Detects raw exception detail returned to clients",
+  );
+  await expectNoFinding(
+    `catch (error) { logger.error(error); res.status(500).json({ error: 'Internal error' }); }`,
+    "API-001",
+    "Generic public API error is clean",
+  );
+  await expectFinding(
+    `res.status(200).json({ error: 'User not found' });`,
+    "API-002",
+    "Detects error payload with success status",
+  );
+  await expectNoFinding(
+    `res.status(404).json({ error: 'User not found' });`,
+    "API-002",
+    "Error payload with failure status is clean",
+  );
+  await expectFinding(
+    `function handler(req, res) { if (!req.user) { res.status(401).json({ error: 'Unauthorized' }); } res.json(secret); }`,
+    "API-003",
+    "Detects execution continuing after conditional response",
+  );
+  await expectNoFinding(
+    `function handler(req, res) { if (!req.user) { return res.status(401).json({ error: 'Unauthorized' }); } res.json(secret); }`,
+    "API-003",
+    "Returned conditional response is clean",
+  );
+  await expectFinding(
+    `app.get('/admin/users', (req, res) => res.json(users));`,
+    "AUTH-001",
+    "Detects admin route without middleware",
+  );
+  await expectNoFinding(
+    `app.get('/admin/users', requireAuth, requireAdmin, (req, res) => res.json(users));`,
+    "AUTH-001",
+    "Admin route with authorization middleware is clean",
+  );
 
-  console.log('— Abstract Interpretation: Detection');
-  await expectFinding(`
+  console.log("— Abstract Interpretation: Detection");
+  await expectFinding(
+    `
     function renderUser() {
       const user = null;
       user.name;
     }
-  `, 'AI-NULL-001', 'Detects definite null dereference');
+  `,
+    "AI-NULL-001",
+    "Detects definite null dereference",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function helper(x: number) { return x; }
     const user = null;
     user.name;
-  `, 'AI-NULL-001', 'Analyzes code after function declaration (unreachable-block fix)');
+  `,
+    "AI-NULL-001",
+    "Analyzes code after function declaration (unreachable-block fix)",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     let user = getUser();
     user = null;
     user.name;
-  `, 'AI-NULL-001', 'Tracks reassignment to null');
+  `,
+    "AI-NULL-001",
+    "Tracks reassignment to null",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function f() {
       const user = { profile: null };
       return user.profile.name;
     }
-  `, 'AI-NULL-001', 'Field-sensitive state detects nested null dereference');
+  `,
+    "AI-NULL-001",
+    "Field-sensitive state detects nested null dereference",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function f() {
       const user = { profile: { name: 'safe' } };
       user.profile = null;
       return user.profile.name;
     }
-  `, 'AI-NULL-001', 'Property assignment updates field nullability');
+  `,
+    "AI-NULL-001",
+    "Property assignment updates field nullability",
+  );
 
-  await expectNoFinding(`
+  await expectNoFinding(
+    `
     function f() {
       const user = { profile: null as { name: string } | null };
       user.profile = { name: 'safe' };
       return user.profile.name;
     }
-  `, 'AI-NULL-001', 'Non-null property overwrite replaces stale field fact');
+  `,
+    "AI-NULL-001",
+    "Non-null property overwrite replaces stale field fact",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function f() {
       const user = { profile: null };
       const profile = user.profile;
       return profile.name;
     }
-  `, 'AI-NULL-001', 'Field nullability propagates through a local alias');
+  `,
+    "AI-NULL-001",
+    "Field nullability propagates through a local alias",
+  );
 
   {
-    const res = await verifier.verifyCode(`
+    const res = await verifier.verifyCode(
+      `
       function f() {
         const user: { name: string } | null = null;
         { const user = { name: 'safe' }; user.name; }
         user.name;
       }
-    `, 'lexical-null.ts');
-    const findings = res.diagnostics.filter((d) => d.ruleId === 'AI-NULL-001');
-    assert(findings.length === 1 && findings[0].loc.start.line === 5,
-      'Lexical identity isolates an inner non-null shadow from the nullable outer binding');
+    `,
+      "lexical-null.ts",
+    );
+    const findings = res.diagnostics.filter((d) => d.ruleId === "AI-NULL-001");
+    assert(
+      findings.length === 1 && findings[0].loc.start.line === 5,
+      "Lexical identity isolates an inner non-null shadow from the nullable outer binding",
+    );
   }
 
-  await expectNoFinding(`
+  await expectNoFinding(
+    `
     function f() {
       const user = null;
       { const user = { name: 'safe' }; user.name; }
     }
-  `, 'AI-NULL-001', 'Inner shadow does not inherit outer nullability');
+  `,
+    "AI-NULL-001",
+    "Inner shadow does not inherit outer nullability",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function missingUser() { return null; }
     const user = missingUser();
     user.name;
-  `, 'AI-NULL-001', 'Nullability propagates from same-file function summary');
+  `,
+    "AI-NULL-001",
+    "Nullability propagates from same-file function summary",
+  );
 
-  await expectNoFinding(`
+  await expectNoFinding(
+    `
     async function getUsers(): Promise<User[]> {
       try { const response = await api.get('/users'); return response.data; }
       catch (error) { handleError(error); }
@@ -606,315 +1093,487 @@ async function runTests() {
       const users = await getUsers();
       return users.find(user => user.active);
     }
-  `, 'AI-NULL-001', 'No summary is emitted for conditional return with implicit fallthrough');
+  `,
+    "AI-NULL-001",
+    "No summary is emitted for conditional return with implicit fallthrough",
+  );
 
-  console.log('— Taint Flow');
-  await expectFinding(`
+  console.log("— Taint Flow");
+  await expectFinding(
+    `
     function handler(route: any) {
       const url = route.params;
       AsyncStorage.setItem('cache', url);
     }
-  `, 'AI-TAINT-001', 'Taint flow: navigation params into AsyncStorage');
+  `,
+    "AI-TAINT-001",
+    "Taint flow: navigation params into AsyncStorage",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function Screen() {
       const params = useLocalSearchParams();
       const html = params.body;
       return <WebView source={{ html }} />;
     }
-  `, 'AI-TAINT-001', 'Taint flow: expo-router params into WebView');
+  `,
+    "AI-TAINT-001",
+    "Taint flow: expo-router params into WebView",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function Screen() {
       const { html } = useLocalSearchParams();
       return <WebView source={{ html }} />;
     }
-  `, 'AI-TAINT-001', 'Taint survives object destructuring from expo-router params');
+  `,
+    "AI-TAINT-001",
+    "Taint survives object destructuring from expo-router params",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function handler(route: any) {
       const { body: payload } = route.params;
       AsyncStorage.setItem('cache', payload);
     }
-  `, 'AI-TAINT-001', 'Taint survives aliased destructuring from navigation params');
+  `,
+    "AI-TAINT-001",
+    "Taint survives aliased destructuring from navigation params",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function handler(route: any) {
       const { nested: { payload } } = route.params;
       AsyncStorage.setItem('cache', payload);
     }
-  `, 'AI-TAINT-001', 'Taint survives bounded nested destructuring');
+  `,
+    "AI-TAINT-001",
+    "Taint survives bounded nested destructuring",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function handler(route: any) {
       const state = { payload: 'safe' };
       state.payload = route.params.body;
       const payload = state.payload;
       AsyncStorage.setItem('cache', payload);
     }
-  `, 'AI-TAINT-001', 'Field taint propagates through property writes and reads');
+  `,
+    "AI-TAINT-001",
+    "Field taint propagates through property writes and reads",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function handler(route: any) {
       const raw = route.params.body;
-      const payload = ` + "`prefix:${raw}`" + `;
+      const payload = ` +
+      "`prefix:${raw}`" +
+      `;
       AsyncStorage.setItem('cache', payload);
     }
-  `, 'AI-TAINT-001', 'Taint survives template interpolation');
+  `,
+    "AI-TAINT-001",
+    "Taint survives template interpolation",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function handler(route: any, enabled: boolean) {
       const raw = route.params.body;
       const payload = enabled ? raw : 'fallback';
       AsyncStorage.setItem('cache', payload);
     }
-  `, 'AI-TAINT-001', 'Taint survives conditional expressions');
+  `,
+    "AI-TAINT-001",
+    "Taint survives conditional expressions",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function handler(route: any) {
       const raw = route.params.body;
       const payload = JSON.stringify({ raw });
       AsyncStorage.setItem('cache', payload);
     }
-  `, 'AI-TAINT-001', 'Taint survives structured literals and JSON.stringify');
+  `,
+    "AI-TAINT-001",
+    "Taint survives structured literals and JSON.stringify",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function identity<T>(value: T): T { return value; }
     function handler(route: any) {
       const raw = route.params.body;
       const forwarded = identity(raw);
       AsyncStorage.setItem('cache', forwarded);
     }
-  `, 'AI-TAINT-001', 'Taint propagates through same-file parameter passthrough helper');
+  `,
+    "AI-TAINT-001",
+    "Taint propagates through same-file parameter passthrough helper",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function persist(value: string) { AsyncStorage.setItem('cache', value); }
     function handler(route: any) {
       const raw = route.params.body;
       persist(raw);
     }
-  `, 'AI-TAINT-001', 'Sink-effect summary detects tainted argument flow into helper');
+  `,
+    "AI-TAINT-001",
+    "Sink-effect summary detects tainted argument flow into helper",
+  );
 
-  await expectNoFinding(`
+  await expectNoFinding(
+    `
     function persist(value: string) { AsyncStorage.setItem('cache', value); }
     function handler() { persist('safe'); }
-  `, 'AI-TAINT-001', 'Sink-effect summary ignores clean arguments');
+  `,
+    "AI-TAINT-001",
+    "Sink-effect summary ignores clean arguments",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function handler(route: any) {
       const values = [route.params.body];
       values.forEach(value => AsyncStorage.setItem('cache', value));
     }
-  `, 'AI-TAINT-001', 'Taint flows from collection receiver into callback element sink');
+  `,
+    "AI-TAINT-001",
+    "Taint flows from collection receiver into callback element sink",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function persist(value: string) { AsyncStorage.setItem('cache', value); }
     function handler(route: any) {
       const values = [route.params.body];
       values.map(value => persist(value));
     }
-  `, 'AI-TAINT-001', 'Callback element taint reaches a summarized sink helper');
+  `,
+    "AI-TAINT-001",
+    "Callback element taint reaches a summarized sink helper",
+  );
 
-  await expectNoFinding(`
+  await expectNoFinding(
+    `
     function handler() {
       const values = ['safe'];
       values.forEach(value => AsyncStorage.setItem('cache', value));
     }
-  `, 'AI-TAINT-001', 'Clean collection callback does not produce taint finding');
+  `,
+    "AI-TAINT-001",
+    "Clean collection callback does not produce taint finding",
+  );
 
-  await expectNoFinding(`
+  await expectNoFinding(
+    `
     function cleanHtml(value: string) { return DOMPurify.sanitize(value); }
     function Screen(route: any) {
       const raw = route.params.body;
       const clean = cleanHtml(raw);
       return <WebView source={{ html: clean }} />;
     }
-  `, 'AI-TAINT-001', 'DOMPurify-backed same-file helper clears taint');
+  `,
+    "AI-TAINT-001",
+    "DOMPurify-backed same-file helper clears taint",
+  );
 
-  await expectNoFinding(`
+  await expectNoFinding(
+    `
     function handler(route: any) {
       const payload = route.params.body;
       { const payload = 'safe'; AsyncStorage.setItem('cache', payload); }
     }
-  `, 'AI-TAINT-001', 'Inner shadow does not inherit outer taint');
+  `,
+    "AI-TAINT-001",
+    "Inner shadow does not inherit outer taint",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function handler(route: any) {
       const payload = route.params.body;
       { const payload = 'safe'; AsyncStorage.setItem('cache', payload); }
       AsyncStorage.setItem('cache', payload);
     }
-  `, 'AI-TAINT-001', 'Outer taint survives an inner clean shadow');
+  `,
+    "AI-TAINT-001",
+    "Outer taint survives an inner clean shadow",
+  );
 
-  console.log('— False Positive Regressions (must stay clean)');
-  await expectClean(`
+  console.log("— False Positive Regressions (must stay clean)");
+  await expectClean(
+    `
     function f() {
       const opts = { timeout: 1000 };
       return opts.timeout;
     }
-  `, 'Clean: object literal property access');
+  `,
+    "Clean: object literal property access",
+  );
 
-  await expectClean(`
+  await expectClean(
+    `
     const n = 42;
     if (cond) { log(n); }
     n.toFixed(2);
-  `, 'Clean: provably non-null value after branch (join identity fix)');
+  `,
+    "Clean: provably non-null value after branch (join identity fix)",
+  );
 
-  await expectClean(`
+  await expectClean(
+    `
     useEffect(() => {
       const id = setInterval(tick, 1000);
       return () => clearInterval(id);
     });
-  `, 'Clean: setInterval is not a state setter');
+  `,
+    "Clean: setInterval is not a state setter",
+  );
 
-  await expectClean(`
+  await expectClean(
+    `
     export function Theme() {
       AsyncStorage.setItem('theme_preference', 'dark');
     }
-  `, 'Clean: non-sensitive AsyncStorage key');
+  `,
+    "Clean: non-sensitive AsyncStorage key",
+  );
 
-  await expectClean(`
+  await expectClean(
+    `
     export function Article() {
       return <WebView source={{ html: '<h1>Static</h1>' }} />;
     }
-  `, 'Clean: static WebView HTML string');
+  `,
+    "Clean: static WebView HTML string",
+  );
 
-  await expectClean(`
+  await expectClean(
+    `
     export function Counter() {
       const [count, setCount] = useState(0);
       useEffect(() => { setCount(1); }, []);
       return <div>{count}</div>;
     }
-  `, 'Clean: setState inside effect WITH dependency array');
+  `,
+    "Clean: setState inside effect WITH dependency array",
+  );
 
-  await expectClean(`
+  await expectClean(
+    `
     function renderUser(user: any) {
       if (user !== null) {
         user.name;
       }
     }
-  `, 'Clean: null guard refines nullability (path-sensitive fix)');
+  `,
+    "Clean: null guard refines nullability (path-sensitive fix)",
+  );
 
-  await expectClean(`
+  await expectClean(
+    `
     function renderUser(user: any) {
       if (user === null) return;
       user.name;
     }
-  `, 'Clean: early return on null refines else-path');
+  `,
+    "Clean: early return on null refines else-path",
+  );
 
-  await expectClean(`
+  await expectClean(
+    `
     function Profile({ isAdmin }: any) {
       const handler = () => { const [x] = useState(0); return x; };
       if (isAdmin) { log(handler); }
       return null;
     }
-  `, 'Clean: hook inside nested callback is a different scope');
+  `,
+    "Clean: hook inside nested callback is a different scope",
+  );
 
-  await expectClean(`
+  await expectClean(
+    `
     function renderUser(user: any) {
       return user?.name;
     }
-  `, 'Clean: optional chaining is not a dereference');
+  `,
+    "Clean: optional chaining is not a dereference",
+  );
 
-  await expectClean(`
+  await expectClean(
+    `
     export function Profile({ isVip }: { isVip: boolean }) {
       if (isVip) { log('vip'); }
       const [discount] = useState(20);
       return <div>{discount}</div>;
     }
-  `, 'Clean: hook after if statement (not inside)');
+  `,
+    "Clean: hook after if statement (not inside)",
+  );
 
-  await expectClean(`
+  await expectClean(
+    `
     function useFolderForm(control: any) {
       const scope = useWatch({ control, name: 'scope' }) || 'private';
       const people = useWatch({ control, name: 'people' }) ?? [];
       return { scope, people };
     }
-  `, 'Clean: fallback applied to hook result is not a conditional hook');
+  `,
+    "Clean: fallback applied to hook result is not a conditional hook",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function useFolderForm(control: any, enabled: boolean) {
       const scope = enabled && useWatch({ control, name: 'scope' });
       return scope;
     }
-  `, 'REACT-002', 'Detects hook in conditionally evaluated RHS');
+  `,
+    "REACT-002",
+    "Detects hook in conditionally evaluated RHS",
+  );
 
-  await expectClean(`
+  await expectClean(
+    `
     const AUTH_TOKEN_KEY = 'sabi_auth_access_token';
     const REFRESH_TOKEN_KEY = 'sabi_auth_refresh_token';
-  `, 'Clean: credential storage key names are not secret values');
+  `,
+    "Clean: credential storage key names are not secret values",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     const AUTH_TOKEN = 'ProdToken-8f73A91z!';
-  `, 'SEC-003', 'Detects complex hardcoded credential by sensitive name');
+  `,
+    "SEC-003",
+    "Detects complex hardcoded credential by sensitive name",
+  );
 
-  await expectClean(`
+  await expectClean(
+    `
     function Invoices() {
       const [selectedInvoice] = useState<Invoice | null>(null);
       return selectedInvoice && <Modal id={selectedInvoice.id} />;
     }
-  `, 'Clean: JSX logical guard refines nullable value');
+  `,
+    "Clean: JSX logical guard refines nullable value",
+  );
 
-  await expectClean(`
+  await expectClean(
+    `
     function Invoices() {
       const [selectedInvoice] = useState<Invoice | null>(null);
       return selectedInvoice
         ? <Modal id={selectedInvoice.id} />
         : <EmptyState />;
     }
-  `, 'Clean: JSX ternary branch refines nullable value');
+  `,
+    "Clean: JSX ternary branch refines nullable value",
+  );
 
-  await expectFinding(`
+  await expectFinding(
+    `
     function Invoices() {
       const [selectedInvoice] = useState<Invoice | null>(null);
       return <Modal id={selectedInvoice.id} />;
     }
-  `, 'AI-NULL-001', 'Still detects unguarded nullable JSX access');
+  `,
+    "AI-NULL-001",
+    "Still detects unguarded nullable JSX access",
+  );
 
-  console.log('— Suppression Comments');
+  console.log("— Suppression Comments");
   {
-    const res = await verifier.verifyCode(`
+    const res = await verifier.verifyCode(
+      `
       const user = null;
       // code-verifier-disable-next-line
       user.name;
-    `, 'supp.ts');
-    assert(res.passed, 'code-verifier-disable-next-line suppresses finding');
+    `,
+      "supp.ts",
+    );
+    assert(res.passed, "code-verifier-disable-next-line suppresses finding");
   }
   {
-    const res = await verifier.verifyCode(`
+    const res = await verifier.verifyCode(
+      `
       // code-verifier-disable-file
       const user = null;
       user.name;
-    `, 'supp-file.ts');
-    assert(res.passed, 'code-verifier-disable-file suppresses whole file');
+    `,
+      "supp-file.ts",
+    );
+    assert(res.passed, "code-verifier-disable-file suppresses whole file");
   }
 
-  console.log('— Lattice Math (unit)');
+  console.log("— Lattice Math (unit)");
   {
     // (TOP used implicitly by sanitize assertions below)
     const unit = IntervalDomain.constant(5);
-    assert(IntervalDomain.toString(IntervalDomain.add(unit, unit)) === '[10, 10]', 'Interval 5+5=[10,10]');
-    const inf = IntervalDomain.add(IntervalDomain.fromRange(5, Infinity), IntervalDomain.fromRange(-Infinity, 5));
-    assert(!Number.isNaN(inf.min) && !Number.isNaN(inf.max), 'Infinity arithmetic does not produce NaN (sanitize fix)');
-    assert(IntervalDomain.isTop(IntervalDomain.add(IntervalDomain.fromRange(-Infinity, 1), IntervalDomain.fromRange(-1, Infinity))), '[-∞]+[+∞] widens to Top');
+    assert(
+      IntervalDomain.toString(IntervalDomain.add(unit, unit)) === "[10, 10]",
+      "Interval 5+5=[10,10]",
+    );
+    const inf = IntervalDomain.add(
+      IntervalDomain.fromRange(5, Infinity),
+      IntervalDomain.fromRange(-Infinity, 5),
+    );
+    assert(
+      !Number.isNaN(inf.min) && !Number.isNaN(inf.max),
+      "Infinity arithmetic does not produce NaN (sanitize fix)",
+    );
+    assert(
+      IntervalDomain.isTop(
+        IntervalDomain.add(
+          IntervalDomain.fromRange(-Infinity, 1),
+          IntervalDomain.fromRange(-1, Infinity),
+        ),
+      ),
+      "[-∞]+[+∞] widens to Top",
+    );
   }
   {
     // Join identity: empty map must not pollute known facts
     const known: MemoryAbstractState = new Map();
-    MemoryState.set(known, 'x', { nullability: 'NonNull' });
+    MemoryState.set(known, "x", { nullability: "NonNull" });
     const joined = MemoryState.join(new Map(), known);
-    assert(MemoryState.get(joined, 'x').nullability === 'NonNull', 'join({}, s) preserves facts (⊥ identity fix)');
+    assert(
+      MemoryState.get(joined, "x").nullability === "NonNull",
+      "join({}, s) preserves facts (⊥ identity fix)",
+    );
     const widened = MemoryState.widen(new Map(), known);
-    assert(MemoryState.get(widened, 'x').nullability === 'NonNull', 'widen({}, s) preserves facts');
+    assert(
+      MemoryState.get(widened, "x").nullability === "NonNull",
+      "widen({}, s) preserves facts",
+    );
   }
   {
-    assert(NullabilityDomain.join('NonNull', 'Null') === 'Nullable', 'NonNull ⊔ Null = Nullable');
-    assert(NullabilityDomain.join('Null', 'Null') === 'Null', 'Null ⊔ Null = Null');
-    assert(NullabilityDomain.join('Top', 'NonNull') === 'Top', 'Top absorbs');
-    assert(!NullabilityDomain.isKnownPossiblyNull('Top'), 'Top is NOT reported as known-possibly-null (FP fix)');
+    assert(
+      NullabilityDomain.join("NonNull", "Null") === "Nullable",
+      "NonNull ⊔ Null = Nullable",
+    );
+    assert(
+      NullabilityDomain.join("Null", "Null") === "Null",
+      "Null ⊔ Null = Null",
+    );
+    assert(NullabilityDomain.join("Top", "NonNull") === "Top", "Top absorbs");
+    assert(
+      !NullabilityDomain.isKnownPossiblyNull("Top"),
+      "Top is NOT reported as known-possibly-null (FP fix)",
+    );
   }
 
-  console.log('— End-to-End');
+  console.log("— End-to-End");
   {
     const code = `
       import React, { useState, useEffect } from 'react';
@@ -939,168 +1598,326 @@ async function runTests() {
         );
       }
     `;
-    const res = await verifier.verifyCode(code, 'CleanComponent.tsx');
-    assert(res.passed, 'Clean React Native / Expo component passes with 0 issues');
-    assert((res.stats.functionsAnalyzed ?? 0) >= 2, 'Stats report multiple analyzed functions');
+    const res = await verifier.verifyCode(code, "CleanComponent.tsx");
+    assert(
+      res.passed,
+      "Clean React Native / Expo component passes with 0 issues",
+    );
+    assert(
+      (res.stats.functionsAnalyzed ?? 0) >= 2,
+      "Stats report multiple analyzed functions",
+    );
   }
   {
-    const res = await verifier.verifyCode(`
+    const res = await verifier.verifyCode(
+      `
       const user = null;
       user.name;
-    `, 'fmt.ts');
+    `,
+      "fmt.ts",
+    );
     const md = LLMFormatter.formatForLLMPrompt(res);
-    assert(md.includes('AI-NULL-001') && md.includes('Nullability'), 'LLM formatter includes rule id and invariants');
+    assert(
+      md.includes("AI-NULL-001") && md.includes("Nullability"),
+      "LLM formatter includes rule id and invariants",
+    );
   }
 
-
-  console.log('— TypeScript-Seed Nullability (new precision pass)');
-  await expectFinding(`function greet(u: { name: string } | null) { return u.name; }`, 'AI-NULL-001',
-    'Nullable param deref is flagged');
-  await expectClean(`function greet(u: { name: string } | null) { if (!u) return null; return u.name; }`,
-    'Guarded nullable param is clean');
-  await expectFinding(`function f(api: any) { const u: { a: number } | null = api.user; return u.a; }`, 'AI-NULL-001',
-    'Annotated const from unmodeled value is flagged');
-  await expectClean(`function f(api: any) { const u: { a: number } | null = api.user; if (!u) return null; return u.a; }`,
-    'Guarded annotated const is clean');
-  await expectClean(`function f(u: { a: number } | null) { return u!.a; }`,
-    'Non-null assertion is trusted');
-  await expectClean(`function f(u: { a: number } | null) { const v = u ?? { a: 1 }; return v.a; }`,
-    'Nullish coalesce fallback is clean');
-  await expectClean(`function f(u: { a: number } | null) { const v = u || ({ a: 1 } as any); return v.a; }`,
-    'OR with non-null fallback is clean');
-  await expectClean(`function f(u: { a: number } | null) { if (u != null) return u.a; return 0; }`,
-    'Loose != null guard is clean');
-  await expectClean(`function f(u: { a: number } | null) { if (typeof u === 'undefined') return 0; return u.a; }`,
-    'typeof-undefined guard is clean');
-  await expectClean(`function f(u: { p: string } | null) { if (u?.p) return u.p.length; return 0; }`,
-    'Optional-chain condition proves non-null base');
-  await expectClean(`function f(u: { p: string } | null) { if (u.p) return u.p.length; return 0; }`,
-    'Member condition proves base non-null');
-  await expectClean(`function format(score: number | null | undefined) {
+  console.log("— TypeScript-Seed Nullability (new precision pass)");
+  await expectFinding(
+    `function greet(u: { name: string } | null) { return u.name; }`,
+    "AI-NULL-001",
+    "Nullable param deref is flagged",
+  );
+  await expectClean(
+    `function greet(u: { name: string } | null) { if (!u) return null; return u.name; }`,
+    "Guarded nullable param is clean",
+  );
+  await expectFinding(
+    `function f(api: any) { const u: { a: number } | null = api.user; return u.a; }`,
+    "AI-NULL-001",
+    "Annotated const from unmodeled value is flagged",
+  );
+  await expectClean(
+    `function f(api: any) { const u: { a: number } | null = api.user; if (!u) return null; return u.a; }`,
+    "Guarded annotated const is clean",
+  );
+  await expectClean(
+    `function f(u: { a: number } | null) { return u!.a; }`,
+    "Non-null assertion is trusted",
+  );
+  await expectClean(
+    `function f(u: { a: number } | null) { const v = u ?? { a: 1 }; return v.a; }`,
+    "Nullish coalesce fallback is clean",
+  );
+  await expectClean(
+    `function f(u: { a: number } | null) { const v = u || ({ a: 1 } as any); return v.a; }`,
+    "OR with non-null fallback is clean",
+  );
+  await expectClean(
+    `function f(u: { a: number } | null) { if (u != null) return u.a; return 0; }`,
+    "Loose != null guard is clean",
+  );
+  await expectClean(
+    `function f(u: { a: number } | null) { if (typeof u === 'undefined') return 0; return u.a; }`,
+    "typeof-undefined guard is clean",
+  );
+  await expectClean(
+    `function f(u: { p: string } | null) { if (u?.p) return u.p.length; return 0; }`,
+    "Optional-chain condition proves non-null base",
+  );
+  await expectClean(
+    `function f(u: { p: string } | null) { if (u.p) return u.p.length; return 0; }`,
+    "Member condition proves base non-null",
+  );
+  await expectClean(
+    `function format(score: number | null | undefined) {
     if (typeof score !== 'number') return '-';
     return score.toFixed(2);
-  }`, 'typeof-number early return proves surviving value non-null');
-  await expectFinding(`function C() {
+  }`,
+    "typeof-number early return proves surviving value non-null",
+  );
+  await expectFinding(
+    `function C() {
   const [user] = useState<User | null>(null);
-  return <Text>{user.name}</Text>; }`, 'AI-NULL-001',
-    'useState<T | null> deref in JSX is flagged');
-  await expectClean(`function C() {
+  return <Text>{user.name}</Text>; }`,
+    "AI-NULL-001",
+    "useState<T | null> deref in JSX is flagged",
+  );
+  await expectClean(
+    `function C() {
   const [user] = useState<User | null>(null);
   if (!user) return null;
-  return <Text>{user.name}</Text>; }`, 'Guarded useState JSX is clean');
+  return <Text>{user.name}</Text>; }`,
+    "Guarded useState JSX is clean",
+  );
 
-  console.log('— Hygiene Rules');
-  await expectFinding(`<a href="https://x.com" target="_blank">go</a>`, 'WEB-001',
-    'target=_blank without rel is flagged');
-  await expectClean(`<a href="https://x.com" target="_blank" rel="noopener noreferrer">go</a>`,
-    'target=_blank with rel=noopener is clean');
-  await expectFinding(`function f() { debugger; }`, 'HYG-001', 'debugger statement is flagged');
-  await expectFinding(`const apiUrl = 'http://api.example-real.dev/v1';`, 'NET-001',
-    'http:// in url-ish var is flagged');
-  await expectClean(`const note = 'http://example.com/see-also';`, 'example.com http is exempt');
-  await expectClean(`const cfg = { baseURL: 'http://localhost:3000' };`, 'localhost http is exempt');
+  console.log("— Hygiene Rules");
+  await expectFinding(
+    `<a href="https://x.com" target="_blank">go</a>`,
+    "WEB-001",
+    "target=_blank without rel is flagged",
+  );
+  await expectClean(
+    `<a href="https://x.com" target="_blank" rel="noopener noreferrer">go</a>`,
+    "target=_blank with rel=noopener is clean",
+  );
+  await expectFinding(
+    `function f() { debugger; }`,
+    "HYG-001",
+    "debugger statement is flagged",
+  );
+  await expectFinding(
+    `const apiUrl = 'http://api.example-real.dev/v1';`,
+    "NET-001",
+    "http:// in url-ish var is flagged",
+  );
+  await expectClean(
+    `const note = 'http://example.com/see-also';`,
+    "example.com http is exempt",
+  );
+  await expectClean(
+    `const cfg = { baseURL: 'http://localhost:3000' };`,
+    "localhost http is exempt",
+  );
 
-  console.log('— Crash-Proofing');
+  console.log("— Crash-Proofing");
   {
-    const res = await verifier.verifyCode(`const broken = {`, 'crash.ts');
-    const parse = res.diagnostics.find((d) => d.ruleId === 'PARSE-001');
-    assert(!!parse && res.status === 'INCOMPLETE' && !res.passed, 'Parse failure makes verification incomplete');
+    const res = await verifier.verifyCode(`const broken = {`, "crash.ts");
+    const parse = res.diagnostics.find((d) => d.ruleId === "PARSE-001");
+    assert(
+      !!parse && res.status === "INCOMPLETE" && !res.passed,
+      "Parse failure makes verification incomplete",
+    );
     const sarif = JSON.parse(formatSARIF([res]));
     assert(
       sarif.runs[0].invocations[0].executionSuccessful === false &&
         sarif.runs[0].invocations[0].toolExecutionNotifications.length > 0,
-      'SARIF reports incomplete execution with notifications'
+      "SARIF reports incomplete execution with notifications",
     );
   }
   {
-    const verifier2 = new CodeVerifier({ disabledRules: ['AI-NULL-001'], severityOverrides: { 'NET-001': 'INFO' } });
-    const res = await verifier2.verifyCode(`function f(u: { a: number } | null) { return u.a; }`, 'cfg.ts');
-    assert(!res.diagnostics.some((d) => d.ruleId === 'AI-NULL-001'), 'disabledRules suppresses rule');
-    const res2 = await verifier2.verifyCode(`const apiUrl = 'http://private.example.dev/api';`, 'cfg2.ts');
-    const net = res2.diagnostics.find((d) => d.ruleId === 'NET-001');
-    assert(net !== undefined && net.severity === 'INFO', 'severityOverrides remaps severity');
+    const verifier2 = new CodeVerifier({
+      disabledRules: ["AI-NULL-001"],
+      severityOverrides: { "NET-001": "INFO" },
+    });
+    const res = await verifier2.verifyCode(
+      `function f(u: { a: number } | null) { return u.a; }`,
+      "cfg.ts",
+    );
+    assert(
+      !res.diagnostics.some((d) => d.ruleId === "AI-NULL-001"),
+      "disabledRules suppresses rule",
+    );
+    const res2 = await verifier2.verifyCode(
+      `const apiUrl = 'http://private.example.dev/api';`,
+      "cfg2.ts",
+    );
+    const net = res2.diagnostics.find((d) => d.ruleId === "NET-001");
+    assert(
+      net !== undefined && net.severity === "INFO",
+      "severityOverrides remaps severity",
+    );
   }
 
-  console.log('— Fixed-Point Coverage');
+  console.log("— Fixed-Point Coverage");
   // Regression: an entry node with zero leading statements (body starts with
   // `if`/`switch`/`while`) used to produce an unchanged stateOut on its first
   // visit, never enqueueing successors — the whole downstream body was
   // silently un-analyzed. These bodies MUST still be analyzed.
   await expectFinding(
     `function f(u: { a: number } | null) { if (Math.random()) return 0; return u.a; }`,
-    'AI-NULL-001',
-    'if-first body still analyzes (first-visit enqueue)');
+    "AI-NULL-001",
+    "if-first body still analyzes (first-visit enqueue)",
+  );
   await expectClean(
     `function f(u: { a: number } | null) { if (!u) return 0; return u.a; }`,
-    'if-first body still refines guards');
+    "if-first body still refines guards",
+  );
   await expectFinding(
     `function f(u: { a: number } | null) { while (Math.random()) { const b = u.a; } return 0; }`,
-    'AI-NULL-001',
-    'while-first body still analyzes');
+    "AI-NULL-001",
+    "while-first body still analyzes",
+  );
   await expectFinding(
     `const f = () => { if (Math.random()) return null; const u: { a: string } | null = null; return u.a; };`,
-    'AI-NULL-001',
-    'nested control-flow-first arrow still analyzes');
+    "AI-NULL-001",
+    "nested control-flow-first arrow still analyzes",
+  );
 
-  console.log('— Rule Registry and Status Contract');
+  console.log("— Rule Registry and Status Contract");
   {
     const errors = validateRuleRegistry(ALL_RULES);
-    assert(errors.length === 0, 'Every implemented rule has unique registry metadata', errors.join('; '));
-    assert(RULE_REGISTRY.size === ALL_RULES.length, 'Registry and implementation counts match');
-    const res = await verifier.verifyCode(`function f() { debugger; }`, 'metadata.ts');
-    assert(res.status === 'PASSED' && res.passed, 'Advisory-only completed scan passes');
-    assert(res.diagnostics[0]?.confidence === 'HIGH', 'Registry confidence propagates to diagnostics');
-    assert(res.checks.every((check) => check.status === 'PASSED'), 'Completed scan reports all required checks passed');
-    assert(classifyESLintExit(0) === 'PASSED', 'ESLint exit 0 maps to passed');
-    assert(classifyESLintExit(1) === 'FAILED', 'ESLint exit 1 maps to findings');
-    assert(classifyESLintExit(2) === 'INCOMPLETE', 'ESLint exit 2 maps to tool failure');
     assert(
-      summarizeESLintOutput(JSON.stringify([
-        { filePath: '/repo/a.ts', errorCount: 1, warningCount: 2, messages: [{ ruleId: 'no-undef', message: 'x is not defined', line: 3 }] },
-      ])).startsWith('1 error(s), 2 warning(s) in 1 file(s)'),
-      'ESLint JSON is summarized without dumping the payload'
+      errors.length === 0,
+      "Every implemented rule has unique registry metadata",
+      errors.join("; "),
     );
     assert(
-      summarizeNpmAuditOutput(JSON.stringify({ metadata: { vulnerabilities: { total: 2, critical: 1, high: 1, moderate: 0, low: 0 } } })) ===
-        '2 vulnerabilities (critical: 1, high: 1, moderate: 0, low: 0)',
-      'npm audit JSON is summarized by severity'
+      RULE_REGISTRY.size === ALL_RULES.length,
+      "Registry and implementation counts match",
+    );
+    const res = await verifier.verifyCode(
+      `function f() { debugger; }`,
+      "metadata.ts",
     );
     assert(
-      classifyNpmAuditExit(1, JSON.stringify({ metadata: { vulnerabilities: { total: 1, high: 1 } } })) === 'FAILED',
-      'npm audit findings map to failed'
+      res.status === "PASSED" && res.passed,
+      "Advisory-only completed scan passes",
     );
     assert(
-      classifyNpmAuditExit(1, `npm error\n${JSON.stringify({ error: { summary: 'registry unavailable' } })}`) === 'INCOMPLETE',
-      'npm audit network/tool errors map to incomplete'
+      res.diagnostics[0]?.confidence === "HIGH",
+      "Registry confidence propagates to diagnostics",
+    );
+    assert(
+      res.checks.every((check) => check.status === "PASSED"),
+      "Completed scan reports all required checks passed",
+    );
+    assert(classifyESLintExit(0) === "PASSED", "ESLint exit 0 maps to passed");
+    assert(
+      classifyESLintExit(1) === "FAILED",
+      "ESLint exit 1 maps to findings",
+    );
+    assert(
+      classifyESLintExit(2) === "INCOMPLETE",
+      "ESLint exit 2 maps to tool failure",
+    );
+    assert(
+      summarizeESLintOutput(
+        JSON.stringify([
+          {
+            filePath: "/repo/a.ts",
+            errorCount: 1,
+            warningCount: 2,
+            messages: [
+              { ruleId: "no-undef", message: "x is not defined", line: 3 },
+            ],
+          },
+        ]),
+      ).startsWith("1 error(s), 2 warning(s) in 1 file(s)"),
+      "ESLint JSON is summarized without dumping the payload",
+    );
+    assert(
+      summarizeNpmAuditOutput(
+        JSON.stringify({
+          metadata: {
+            vulnerabilities: {
+              total: 2,
+              critical: 1,
+              high: 1,
+              moderate: 0,
+              low: 0,
+            },
+          },
+        }),
+      ) === "2 vulnerabilities (critical: 1, high: 1, moderate: 0, low: 0)",
+      "npm audit JSON is summarized by severity",
+    );
+    assert(
+      classifyNpmAuditExit(
+        1,
+        JSON.stringify({
+          metadata: { vulnerabilities: { total: 1, high: 1 } },
+        }),
+      ) === "FAILED",
+      "npm audit findings map to failed",
+    );
+    assert(
+      classifyNpmAuditExit(
+        1,
+        `npm error\n${JSON.stringify({ error: { summary: "registry unavailable" } })}`,
+      ) === "INCOMPLETE",
+      "npm audit network/tool errors map to incomplete",
     );
   }
 
-  console.log('— Cross-File Function Summaries');
+  console.log("— Cross-File Function Summaries");
   {
-    const fixtureRoot = path.resolve(__dirname, 'fixtures/project-summaries');
-    const helper = path.join(fixtureRoot, 'helpers.fixture');
-    const barrel = path.join(fixtureRoot, 'barrel.fixture');
-    const barrelChain = path.join(fixtureRoot, 'barrel-chain.fixture');
-    const consumer = path.join(fixtureRoot, 'consumer.fixture');
-    const aliasConsumer = path.join(fixtureRoot, 'alias-consumer.fixture');
-    const layer = path.join(fixtureRoot, 'layer.fixture');
-    const deepConsumer = path.join(fixtureRoot, 'deep-consumer.fixture');
-    const projectFiles = [helper, barrel, barrelChain, consumer, aliasConsumer, layer, deepConsumer];
+    const fixtureRoot = path.resolve(__dirname, "fixtures/project-summaries");
+    const helper = path.join(fixtureRoot, "helpers.fixture");
+    const barrel = path.join(fixtureRoot, "barrel.fixture");
+    const barrelChain = path.join(fixtureRoot, "barrel-chain.fixture");
+    const consumer = path.join(fixtureRoot, "consumer.fixture");
+    const aliasConsumer = path.join(fixtureRoot, "alias-consumer.fixture");
+    const layer = path.join(fixtureRoot, "layer.fixture");
+    const deepConsumer = path.join(fixtureRoot, "deep-consumer.fixture");
+    const projectFiles = [
+      helper,
+      barrel,
+      barrelChain,
+      consumer,
+      aliasConsumer,
+      layer,
+      deepConsumer,
+    ];
     const projectVerifier = new CodeVerifier({
       projectSummaryIndex: ProjectSummaryIndex.fromFiles(projectFiles),
     });
     const res = await projectVerifier.verifyFile(consumer);
-    assert(res.diagnostics.some((d) => d.ruleId === 'AI-TAINT-001'), 'Taint crosses relative imported passthrough helpers');
-    assert(res.diagnostics.some((d) => d.ruleId === 'AI-NULL-001'), 'Nullability crosses relative imported helpers');
+    assert(
+      res.diagnostics.some((d) => d.ruleId === "AI-TAINT-001"),
+      "Taint crosses relative imported passthrough helpers",
+    );
+    assert(
+      res.diagnostics.some((d) => d.ruleId === "AI-NULL-001"),
+      "Nullability crosses relative imported helpers",
+    );
     const aliasRes = await projectVerifier.verifyFile(aliasConsumer);
-    assert(aliasRes.diagnostics.some((d) =>
-      d.ruleId === 'AI-TAINT-001' && d.message.includes('helper function')),
-    'Taint and sink effects cross TypeScript paths aliases');
+    assert(
+      aliasRes.diagnostics.some(
+        (d) =>
+          d.ruleId === "AI-TAINT-001" && d.message.includes("helper function"),
+      ),
+      "Taint and sink effects cross TypeScript paths aliases",
+    );
     const deepRes = await projectVerifier.verifyFile(deepConsumer);
-    assert(deepRes.diagnostics.some((d) => d.ruleId === 'AI-TAINT-001'),
-      'Taint and sink effects compose through multiple imported helper layers');
+    assert(
+      deepRes.diagnostics.some((d) => d.ruleId === "AI-TAINT-001"),
+      "Taint and sink effects compose through multiple imported helper layers",
+    );
 
-    const fieldFlow = await new CodeVerifier().verifyCode(`
+    const fieldFlow = await new CodeVerifier().verifyCode(
+      `
       function select(input) { return input.payload; }
       function unwrap(input) { return select(input); }
       function Screen({ route }) {
@@ -1108,16 +1925,24 @@ async function runTests() {
         const selected = unwrap(envelope);
         AsyncStorage.setItem('value', selected);
       }
-    `, 'summary-field-flow.tsx');
-    assert(fieldFlow.diagnostics.some((d) => d.ruleId === 'AI-TAINT-001'),
-      'Function summaries preserve object-field taint through composed helpers');
+    `,
+      "summary-field-flow.tsx",
+    );
+    assert(
+      fieldFlow.diagnostics.some((d) => d.ruleId === "AI-TAINT-001"),
+      "Function summaries preserve object-field taint through composed helpers",
+    );
   }
 
-  console.log('— Type-Aware Semantics and Mobile Configuration');
+  console.log("— Type-Aware Semantics and Mobile Configuration");
   {
-    const semanticRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'code-verifier-types-'));
-    const semanticFile = path.join(semanticRoot, 'promises.ts');
-    fs.writeFileSync(semanticFile, `
+    const semanticRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "code-verifier-types-"),
+    );
+    const semanticFile = path.join(semanticRoot, "promises.ts");
+    fs.writeFileSync(
+      semanticFile,
+      `
       async function check(): Promise<boolean> { return true; }
       async function run() {
         check();
@@ -1126,54 +1951,110 @@ async function runTests() {
         void check();
         check().catch(handleError);
       }
-    `);
+    `,
+    );
     const semanticVerifier = new CodeVerifier({
       semanticAnalysisIndex: SemanticAnalysisIndex.fromFiles([semanticFile]),
       projectRoot: semanticRoot,
     });
     const semanticResult = await semanticVerifier.verifyFile(semanticFile);
-    assert(semanticResult.diagnostics.filter((d) => d.ruleId === 'TYPE-001').length === 1,
-      'Type checker detects only the unhandled floating Promise');
-    assert(semanticResult.diagnostics.filter((d) => d.ruleId === 'TYPE-002').length === 1,
-      'Type checker detects a Promise used as a condition');
-    assert(semanticResult.diagnostics.find((d) => d.ruleId === 'TYPE-001')?.severity === 'MEDIUM',
-      'Floating promises report at MEDIUM so idiomatic fire-and-forget stays advisory');
-    assert(semanticResult.checks.some((check) => check.id === 'type-semantics' && check.status === 'PASSED'),
-      'TypeScript semantic stage is visible and complete');
+    assert(
+      semanticResult.diagnostics.filter((d) => d.ruleId === "TYPE-001")
+        .length === 1,
+      "Type checker detects only the unhandled floating Promise",
+    );
+    assert(
+      semanticResult.diagnostics.filter((d) => d.ruleId === "TYPE-002")
+        .length === 1,
+      "Type checker detects a Promise used as a condition",
+    );
+    assert(
+      semanticResult.diagnostics.find((d) => d.ruleId === "TYPE-001")
+        ?.severity === "MEDIUM",
+      "Floating promises report at MEDIUM so idiomatic fire-and-forget stays advisory",
+    );
+    assert(
+      semanticResult.checks.some(
+        (check) => check.id === "type-semantics" && check.status === "PASSED",
+      ),
+      "TypeScript semantic stage is visible and complete",
+    );
 
-    const mobileRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'code-verifier-mobile-'));
-    fs.mkdirSync(path.join(mobileRoot, 'android'), { recursive: true });
-    fs.mkdirSync(path.join(mobileRoot, 'ios'), { recursive: true });
-    fs.writeFileSync(path.join(mobileRoot, 'app.json'), JSON.stringify({ expo: {
-      android: { allowBackup: true, usesCleartextTraffic: true, permissions: ['READ_SMS'] },
-      ios: { infoPlist: { NSAppTransportSecurity: { NSAllowsArbitraryLoads: true }, UIFileSharingEnabled: true } },
-    } }));
-    fs.writeFileSync(path.join(mobileRoot, 'android', 'AndroidManifest.xml'), `
+    const mobileRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "code-verifier-mobile-"),
+    );
+    fs.mkdirSync(path.join(mobileRoot, "android"), { recursive: true });
+    fs.mkdirSync(path.join(mobileRoot, "ios"), { recursive: true });
+    fs.writeFileSync(
+      path.join(mobileRoot, "app.json"),
+      JSON.stringify({
+        expo: {
+          android: {
+            allowBackup: true,
+            usesCleartextTraffic: true,
+            permissions: ["READ_SMS"],
+          },
+          ios: {
+            infoPlist: {
+              NSAppTransportSecurity: { NSAllowsArbitraryLoads: true },
+              UIFileSharingEnabled: true,
+            },
+          },
+        },
+      }),
+    );
+    fs.writeFileSync(
+      path.join(mobileRoot, "android", "AndroidManifest.xml"),
+      `
       <manifest><application android:allowBackup="false" android:usesCleartextTraffic="false" android:debuggable="true">
         <service android:name=".SyncService" android:exported="true" />
       </application></manifest>
-    `);
-    fs.writeFileSync(path.join(mobileRoot, 'ios', 'Info.plist'), `
+    `,
+    );
+    fs.writeFileSync(
+      path.join(mobileRoot, "ios", "Info.plist"),
+      `
       <plist><dict><key>NSAppTransportSecurity</key><dict>
         <key>NSAllowsArbitraryLoads</key><false/>
       </dict></dict></plist>
-    `);
-    const mobileResults = verifyMobileConfigs([mobileRoot], { projectRoot: mobileRoot });
-    const mobileDiagnostics = mobileResults.flatMap((result) => result.diagnostics);
-    assert(mobileDiagnostics.some((d) => d.ruleId === 'MOB-001'), 'Detects enabled Expo Android backup');
-    assert(mobileDiagnostics.filter((d) => d.ruleId === 'MOB-002').length === 2,
-      'Detects Expo Android cleartext and iOS global ATS opt-out');
-    assert(mobileDiagnostics.some((d) => d.ruleId === 'MOB-003'),
-      'Detects unprotected exported Android component');
-    assert(['MOB-004', 'MOB-005', 'MOB-006'].every((rule) =>
-      mobileDiagnostics.some((finding) => finding.ruleId === rule)),
-    'Detects debuggable apps, iOS document sharing, and high-risk Android permissions');
-    assert(mobileResults.every((result) => result.checks[0].status === 'PASSED'),
-      'Cleanly parses Expo, Android, and iOS configuration formats');
+    `,
+    );
+    const mobileResults = verifyMobileConfigs([mobileRoot], {
+      projectRoot: mobileRoot,
+    });
+    const mobileDiagnostics = mobileResults.flatMap(
+      (result) => result.diagnostics,
+    );
+    assert(
+      mobileDiagnostics.some((d) => d.ruleId === "MOB-001"),
+      "Detects enabled Expo Android backup",
+    );
+    assert(
+      mobileDiagnostics.filter((d) => d.ruleId === "MOB-002").length === 2,
+      "Detects Expo Android cleartext and iOS global ATS opt-out",
+    );
+    assert(
+      mobileDiagnostics.some((d) => d.ruleId === "MOB-003"),
+      "Detects unprotected exported Android component",
+    );
+    assert(
+      ["MOB-004", "MOB-005", "MOB-006"].every((rule) =>
+        mobileDiagnostics.some((finding) => finding.ruleId === rule),
+      ),
+      "Detects debuggable apps, iOS document sharing, and high-risk Android permissions",
+    );
+    assert(
+      mobileResults.every((result) => result.checks[0].status === "PASSED"),
+      "Cleanly parses Expo, Android, and iOS configuration formats",
+    );
 
-    const launcherRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'code-verifier-launcher-'));
-    fs.mkdirSync(path.join(launcherRoot, 'android'), { recursive: true });
-    fs.writeFileSync(path.join(launcherRoot, 'android', 'AndroidManifest.xml'), `
+    const launcherRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "code-verifier-launcher-"),
+    );
+    fs.mkdirSync(path.join(launcherRoot, "android"), { recursive: true });
+    fs.writeFileSync(
+      path.join(launcherRoot, "android", "AndroidManifest.xml"),
+      `
       <manifest><application>
         <activity android:name=".MainActivity" android:exported="true">
           <intent-filter>
@@ -1183,155 +2064,385 @@ async function runTests() {
         </activity>
         <activity android:name=".AdminPanelActivity" android:exported="true" />
       </application></manifest>
-    `);
-    const launcherDiagnostics = verifyMobileConfigs([launcherRoot], { projectRoot: launcherRoot })
-      .flatMap((result) => result.diagnostics);
-    assert(!launcherDiagnostics.some((d) => d.ruleId === 'MOB-003' && (d.codeSnippet?.includes('MainActivity') ?? false)),
-      'Exempts the launcher entry activity from MOB-003');
-    assert(launcherDiagnostics.some((d) => d.ruleId === 'MOB-003' && (d.codeSnippet?.includes('AdminPanelActivity') ?? false)),
-      'Still flags exported non-launcher activities without permission');
+    `,
+    );
+    const launcherDiagnostics = verifyMobileConfigs([launcherRoot], {
+      projectRoot: launcherRoot,
+    }).flatMap((result) => result.diagnostics);
+    assert(
+      !launcherDiagnostics.some(
+        (d) =>
+          d.ruleId === "MOB-003" &&
+          (d.codeSnippet?.includes("MainActivity") ?? false),
+      ),
+      "Exempts the launcher entry activity from MOB-003",
+    );
+    assert(
+      launcherDiagnostics.some(
+        (d) =>
+          d.ruleId === "MOB-003" &&
+          (d.codeSnippet?.includes("AdminPanelActivity") ?? false),
+      ),
+      "Still flags exported non-launcher activities without permission",
+    );
 
-    const backupRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'code-verifier-backup-'));
-    fs.mkdirSync(path.join(backupRoot, 'android'), { recursive: true });
-    fs.writeFileSync(path.join(backupRoot, 'android', 'AndroidManifest.xml'), `
+    const backupRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "code-verifier-backup-"),
+    );
+    fs.mkdirSync(path.join(backupRoot, "android"), { recursive: true });
+    fs.writeFileSync(
+      path.join(backupRoot, "android", "AndroidManifest.xml"),
+      `
       <manifest><application android:allowBackup="true"
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/extraction_rules">
       </application></manifest>
-    `);
-    const backupFinding = verifyMobileConfigs([backupRoot], { projectRoot: backupRoot })
-      .flatMap((result) => result.diagnostics).find((d) => d.ruleId === 'MOB-001');
-    assert(backupFinding !== undefined && backupFinding.severity === 'LOW',
-      'Downgrades manifest backup findings when scoped exclusion rules are configured');
+    `,
+    );
+    const backupFinding = verifyMobileConfigs([backupRoot], {
+      projectRoot: backupRoot,
+    })
+      .flatMap((result) => result.diagnostics)
+      .find((d) => d.ruleId === "MOB-001");
+    assert(
+      backupFinding !== undefined && backupFinding.severity === "LOW",
+      "Downgrades manifest backup findings when scoped exclusion rules are configured",
+    );
 
-    const plainRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'code-verifier-plainbackup-'));
-    fs.mkdirSync(path.join(plainRoot, 'android'), { recursive: true });
-    fs.writeFileSync(path.join(plainRoot, 'android', 'AndroidManifest.xml'), `
+    const plainRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "code-verifier-plainbackup-"),
+    );
+    fs.mkdirSync(path.join(plainRoot, "android"), { recursive: true });
+    fs.writeFileSync(
+      path.join(plainRoot, "android", "AndroidManifest.xml"),
+      `
       <manifest><application android:allowBackup="true"></application></manifest>
-    `);
-    const plainFinding = verifyMobileConfigs([plainRoot], { projectRoot: plainRoot })
-      .flatMap((result) => result.diagnostics).find((d) => d.ruleId === 'MOB-001');
-    assert(plainFinding !== undefined && plainFinding.severity === 'MEDIUM',
-      'Keeps manifest backup findings at MEDIUM without scoped exclusion rules');
+    `,
+    );
+    const plainFinding = verifyMobileConfigs([plainRoot], {
+      projectRoot: plainRoot,
+    })
+      .flatMap((result) => result.diagnostics)
+      .find((d) => d.ruleId === "MOB-001");
+    assert(
+      plainFinding !== undefined && plainFinding.severity === "MEDIUM",
+      "Keeps manifest backup findings at MEDIUM without scoped exclusion rules",
+    );
 
-    const debugVariantRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'code-verifier-debugvariant-'));
-    fs.mkdirSync(path.join(debugVariantRoot, 'android', 'app', 'src', 'debug'), { recursive: true });
-    fs.writeFileSync(path.join(debugVariantRoot, 'android', 'app', 'src', 'debug', 'AndroidManifest.xml'), `
+    const debugVariantRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "code-verifier-debugvariant-"),
+    );
+    fs.mkdirSync(
+      path.join(debugVariantRoot, "android", "app", "src", "debug"),
+      { recursive: true },
+    );
+    fs.writeFileSync(
+      path.join(
+        debugVariantRoot,
+        "android",
+        "app",
+        "src",
+        "debug",
+        "AndroidManifest.xml",
+      ),
+      `
       <manifest><application android:usesCleartextTraffic="true" android:debuggable="true"></application></manifest>
-    `);
-    const debugDiagnostics = verifyMobileConfigs([debugVariantRoot], { projectRoot: debugVariantRoot })
-      .flatMap((result) => result.diagnostics);
-    const debugCleartext = debugDiagnostics.find((d) => d.ruleId === 'MOB-002');
-    const debugDebuggable = debugDiagnostics.find((d) => d.ruleId === 'MOB-004');
-    assert(debugCleartext !== undefined && debugCleartext.severity === 'LOW',
-      'Reports debug-variant cleartext overlay at advisory LOW');
-    assert(debugDebuggable !== undefined && debugDebuggable.severity === 'LOW',
-      'Reports debug-variant debuggable overlay at advisory LOW');
+    `,
+    );
+    const debugDiagnostics = verifyMobileConfigs([debugVariantRoot], {
+      projectRoot: debugVariantRoot,
+    }).flatMap((result) => result.diagnostics);
+    const debugCleartext = debugDiagnostics.find((d) => d.ruleId === "MOB-002");
+    const debugDebuggable = debugDiagnostics.find(
+      (d) => d.ruleId === "MOB-004",
+    );
+    assert(
+      debugCleartext !== undefined && debugCleartext.severity === "LOW",
+      "Reports debug-variant cleartext overlay at advisory LOW",
+    );
+    assert(
+      debugDebuggable !== undefined && debugDebuggable.severity === "LOW",
+      "Reports debug-variant debuggable overlay at advisory LOW",
+    );
 
-    const mainCleartextRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'code-verifier-maincleartext-'));
-    fs.mkdirSync(path.join(mainCleartextRoot, 'android', 'app', 'src', 'main'), { recursive: true });
-    fs.writeFileSync(path.join(mainCleartextRoot, 'android', 'app', 'src', 'main', 'AndroidManifest.xml'), `
+    const mainCleartextRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "code-verifier-maincleartext-"),
+    );
+    fs.mkdirSync(
+      path.join(mainCleartextRoot, "android", "app", "src", "main"),
+      { recursive: true },
+    );
+    fs.writeFileSync(
+      path.join(
+        mainCleartextRoot,
+        "android",
+        "app",
+        "src",
+        "main",
+        "AndroidManifest.xml",
+      ),
+      `
       <manifest><application android:usesCleartextTraffic="true"></application></manifest>
-    `);
-    const mainCleartext = verifyMobileConfigs([mainCleartextRoot], { projectRoot: mainCleartextRoot })
-      .flatMap((result) => result.diagnostics).find((d) => d.ruleId === 'MOB-002');
-    assert(mainCleartext !== undefined && mainCleartext.severity === 'HIGH',
-      'Keeps main-variant cleartext findings at HIGH');
+    `,
+    );
+    const mainCleartext = verifyMobileConfigs([mainCleartextRoot], {
+      projectRoot: mainCleartextRoot,
+    })
+      .flatMap((result) => result.diagnostics)
+      .find((d) => d.ruleId === "MOB-002");
+    assert(
+      mainCleartext !== undefined && mainCleartext.severity === "HIGH",
+      "Keeps main-variant cleartext findings at HIGH",
+    );
 
-    console.log('— Expo Router and Native Module Consistency');
+    console.log("— Expo Router and Native Module Consistency");
     {
-      const routeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'code-verifier-routes-'));
-      const routeFiles: Array<{ rel: string; body: string; expectFinding: boolean; note: string }> = [
-        { rel: 'src/app/marketplace/post.tsx', body: 'export function Post() { return null; }\n', expectFinding: true, note: 'route without default export is flagged' },
-        { rel: 'src/app/_layout.tsx', body: 'export default function Layout() { return null; }\n', expectFinding: false, note: 'layout with default export passes' },
-        { rel: 'src/app/_components/hidden.tsx', body: 'export function Hidden() { return null; }\n', expectFinding: false, note: 'underscore directory is not a route' },
-        { rel: 'src/app/search+api.ts', body: 'export async function GET() { return new Response(); }\n', expectFinding: false, note: '+api route exports method handlers, not a component' },
-        { rel: 'src/app/index.ts', body: "export { default } from './Home';\n", expectFinding: false, note: 're-export satisfies the default export requirement' },
-        { rel: 'src/components/plain.tsx', body: 'export function Plain() { return null; }\n', expectFinding: false, note: 'files outside app/ are not routes' },
-        { rel: 'src/app/settings.test.tsx', body: 'export function SettingsTest() { return null; }\n', expectFinding: false, note: 'test files inside app/ are ignored' },
+      const routeRoot = fs.mkdtempSync(
+        path.join(os.tmpdir(), "code-verifier-routes-"),
+      );
+      const routeFiles: Array<{
+        rel: string;
+        body: string;
+        expectFinding: boolean;
+        note: string;
+      }> = [
+        {
+          rel: "src/app/marketplace/post.tsx",
+          body: "export function Post() { return null; }\n",
+          expectFinding: true,
+          note: "route without default export is flagged",
+        },
+        {
+          rel: "src/app/_layout.tsx",
+          body: "export default function Layout() { return null; }\n",
+          expectFinding: false,
+          note: "layout with default export passes",
+        },
+        {
+          rel: "src/app/_components/hidden.tsx",
+          body: "export function Hidden() { return null; }\n",
+          expectFinding: false,
+          note: "underscore directory is not a route",
+        },
+        {
+          rel: "src/app/search+api.ts",
+          body: "export async function GET() { return new Response(); }\n",
+          expectFinding: false,
+          note: "+api route exports method handlers, not a component",
+        },
+        {
+          rel: "src/app/index.ts",
+          body: "export { default } from './Home';\n",
+          expectFinding: false,
+          note: "re-export satisfies the default export requirement",
+        },
+        {
+          rel: "src/components/plain.tsx",
+          body: "export function Plain() { return null; }\n",
+          expectFinding: false,
+          note: "files outside app/ are not routes",
+        },
+        {
+          rel: "src/app/settings.test.tsx",
+          body: "export function SettingsTest() { return null; }\n",
+          expectFinding: false,
+          note: "test files inside app/ are ignored",
+        },
       ];
       for (const item of routeFiles) {
-        fs.mkdirSync(path.join(routeRoot, path.dirname(item.rel)), { recursive: true });
+        fs.mkdirSync(path.join(routeRoot, path.dirname(item.rel)), {
+          recursive: true,
+        });
         fs.writeFileSync(path.join(routeRoot, item.rel), item.body);
       }
       const routeVerifier = new CodeVerifier({ projectRoot: routeRoot });
       for (const item of routeFiles) {
-        const result = await routeVerifier.verifyFile(path.join(routeRoot, item.rel));
-        const flagged = result.diagnostics.some((d) => d.ruleId === 'NAV-001');
-        assert(flagged === item.expectFinding, `NAV-001: ${item.note}`,
-          `expected ${item.expectFinding ? 'a finding' : 'no finding'} for ${item.rel}`);
+        const result = await routeVerifier.verifyFile(
+          path.join(routeRoot, item.rel),
+        );
+        const flagged = result.diagnostics.some((d) => d.ruleId === "NAV-001");
+        assert(
+          flagged === item.expectFinding,
+          `NAV-001: ${item.note}`,
+          `expected ${item.expectFinding ? "a finding" : "no finding"} for ${item.rel}`,
+        );
       }
 
-      const staleRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'code-verifier-stale-'));
-      fs.mkdirSync(path.join(staleRoot, 'node_modules', 'expo-fake-picker', 'ios'), { recursive: true });
-      fs.writeFileSync(path.join(staleRoot, 'node_modules', 'expo-fake-picker', 'ios', 'ExpoFakePicker.podspec'),
-        `require 'json'\nPod::Spec.new do |s|\n  s.name           = 'ExpoFakePicker'\nend\n`);
-      fs.mkdirSync(path.join(staleRoot, 'ios'), { recursive: true });
-      fs.writeFileSync(path.join(staleRoot, 'ios', 'Podfile.lock'), 'PODS:\n  - "UnrelatedPod (1.0.0)"\n');
-      fs.mkdirSync(path.join(staleRoot, 'src'), { recursive: true });
-      fs.writeFileSync(path.join(staleRoot, 'src', 'App.tsx'), `import * as Picker from 'expo-fake-picker';\nexport default Picker;\n`);
-      const staleResults = verifyNativeConsistency([staleRoot], { projectRoot: staleRoot });
-      assert(staleResults.length === 1 && staleResults[0].filePath.endsWith('ios/Podfile.lock'),
-        'NAT-001 anchors its result on the Podfile.lock');
-      const staleFinding = staleResults.flatMap((result) => result.diagnostics).find((d) => d.ruleId === 'NAT-001');
-      assert(staleFinding !== undefined,
-        'NAT-001 flags a JS-imported package whose pod is absent from Podfile.lock');
-      assert(staleFinding?.message.includes("'ExpoFakePicker'") === true && staleFinding?.message.includes('expo-fake-picker') === true,
-        'NAT-001 names both the package and its undeclared pod');
-      assert(staleFinding?.explanation.includes('src/App.tsx') === true,
-        'NAT-001 cites the importing source file');
+      const staleRoot = fs.mkdtempSync(
+        path.join(os.tmpdir(), "code-verifier-stale-"),
+      );
+      fs.mkdirSync(
+        path.join(staleRoot, "node_modules", "expo-fake-picker", "ios"),
+        { recursive: true },
+      );
+      fs.writeFileSync(
+        path.join(
+          staleRoot,
+          "node_modules",
+          "expo-fake-picker",
+          "ios",
+          "ExpoFakePicker.podspec",
+        ),
+        `require 'json'\nPod::Spec.new do |s|\n  s.name           = 'ExpoFakePicker'\nend\n`,
+      );
+      fs.mkdirSync(path.join(staleRoot, "ios"), { recursive: true });
+      fs.writeFileSync(
+        path.join(staleRoot, "ios", "Podfile.lock"),
+        'PODS:\n  - "UnrelatedPod (1.0.0)"\n',
+      );
+      fs.mkdirSync(path.join(staleRoot, "src"), { recursive: true });
+      fs.writeFileSync(
+        path.join(staleRoot, "src", "App.tsx"),
+        `import * as Picker from 'expo-fake-picker';\nexport default Picker;\n`,
+      );
+      const staleResults = verifyNativeConsistency([staleRoot], {
+        projectRoot: staleRoot,
+      });
+      assert(
+        staleResults.length === 1 &&
+          staleResults[0].filePath.endsWith("ios/Podfile.lock"),
+        "NAT-001 anchors its result on the Podfile.lock",
+      );
+      const staleFinding = staleResults
+        .flatMap((result) => result.diagnostics)
+        .find((d) => d.ruleId === "NAT-001");
+      assert(
+        staleFinding !== undefined,
+        "NAT-001 flags a JS-imported package whose pod is absent from Podfile.lock",
+      );
+      assert(
+        staleFinding?.message.includes("'ExpoFakePicker'") === true &&
+          staleFinding?.message.includes("expo-fake-picker") === true,
+        "NAT-001 names both the package and its undeclared pod",
+      );
+      assert(
+        staleFinding?.explanation.includes("src/App.tsx") === true,
+        "NAT-001 cites the importing source file",
+      );
 
-      const linkedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'code-verifier-linked-'));
-      fs.mkdirSync(path.join(linkedRoot, 'node_modules', 'expo-fake-picker', 'ios'), { recursive: true });
-      fs.writeFileSync(path.join(linkedRoot, 'node_modules', 'expo-fake-picker', 'ios', 'ExpoFakePicker.podspec'),
-        `Pod::Spec.new do |s|\n  s.name = 'ExpoFakePicker'\nend\n`);
-      fs.mkdirSync(path.join(linkedRoot, 'ios'), { recursive: true });
-      fs.writeFileSync(path.join(linkedRoot, 'ios', 'Podfile.lock'),
-        'PODS:\n  - "ExpoFakePicker (0.1.0)"\n  - "UnrelatedPod (1.0.0)"\n');
-      fs.mkdirSync(path.join(linkedRoot, 'src'), { recursive: true });
-      fs.writeFileSync(path.join(linkedRoot, 'src', 'App.tsx'), `import 'expo-fake-picker';\n`);
-      const linkedDiagnostics = verifyNativeConsistency([linkedRoot], { projectRoot: linkedRoot })
-        .flatMap((result) => result.diagnostics);
-      assert(linkedDiagnostics.length === 0,
-        'NAT-001 stays silent when the imported pod is already linked');
+      const linkedRoot = fs.mkdtempSync(
+        path.join(os.tmpdir(), "code-verifier-linked-"),
+      );
+      fs.mkdirSync(
+        path.join(linkedRoot, "node_modules", "expo-fake-picker", "ios"),
+        { recursive: true },
+      );
+      fs.writeFileSync(
+        path.join(
+          linkedRoot,
+          "node_modules",
+          "expo-fake-picker",
+          "ios",
+          "ExpoFakePicker.podspec",
+        ),
+        `Pod::Spec.new do |s|\n  s.name = 'ExpoFakePicker'\nend\n`,
+      );
+      fs.mkdirSync(path.join(linkedRoot, "ios"), { recursive: true });
+      fs.writeFileSync(
+        path.join(linkedRoot, "ios", "Podfile.lock"),
+        'PODS:\n  - "ExpoFakePicker (0.1.0)"\n  - "UnrelatedPod (1.0.0)"\n',
+      );
+      fs.mkdirSync(path.join(linkedRoot, "src"), { recursive: true });
+      fs.writeFileSync(
+        path.join(linkedRoot, "src", "App.tsx"),
+        `import 'expo-fake-picker';\n`,
+      );
+      const linkedDiagnostics = verifyNativeConsistency([linkedRoot], {
+        projectRoot: linkedRoot,
+      }).flatMap((result) => result.diagnostics);
+      assert(
+        linkedDiagnostics.length === 0,
+        "NAT-001 stays silent when the imported pod is already linked",
+      );
 
-      const jsOnlyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'code-verifier-jsonly-'));
-      fs.mkdirSync(path.join(jsOnlyRoot, 'node_modules', 'tiny-lib'), { recursive: true });
-      fs.writeFileSync(path.join(jsOnlyRoot, 'node_modules', 'tiny-lib', 'package.json'), '{"name":"tiny-lib","version":"1.0.0"}\n');
-      fs.mkdirSync(path.join(jsOnlyRoot, 'ios'), { recursive: true });
-      fs.writeFileSync(path.join(jsOnlyRoot, 'ios', 'Podfile.lock'), 'PODS:\n  - "SomePod (1.0)"\n');
-      fs.mkdirSync(path.join(jsOnlyRoot, 'src'), { recursive: true });
-      fs.writeFileSync(path.join(jsOnlyRoot, 'src', 'App.tsx'), `import { fmt } from 'tiny-lib';\n`);
-      const jsOnlyDiagnostics = verifyNativeConsistency([jsOnlyRoot], { projectRoot: jsOnlyRoot })
-        .flatMap((result) => result.diagnostics);
-      assert(jsOnlyDiagnostics.length === 0,
-        'NAT-001 ignores packages that ship no iOS podspec');
+      const jsOnlyRoot = fs.mkdtempSync(
+        path.join(os.tmpdir(), "code-verifier-jsonly-"),
+      );
+      fs.mkdirSync(path.join(jsOnlyRoot, "node_modules", "tiny-lib"), {
+        recursive: true,
+      });
+      fs.writeFileSync(
+        path.join(jsOnlyRoot, "node_modules", "tiny-lib", "package.json"),
+        '{"name":"tiny-lib","version":"1.0.0"}\n',
+      );
+      fs.mkdirSync(path.join(jsOnlyRoot, "ios"), { recursive: true });
+      fs.writeFileSync(
+        path.join(jsOnlyRoot, "ios", "Podfile.lock"),
+        'PODS:\n  - "SomePod (1.0)"\n',
+      );
+      fs.mkdirSync(path.join(jsOnlyRoot, "src"), { recursive: true });
+      fs.writeFileSync(
+        path.join(jsOnlyRoot, "src", "App.tsx"),
+        `import { fmt } from 'tiny-lib';\n`,
+      );
+      const jsOnlyDiagnostics = verifyNativeConsistency([jsOnlyRoot], {
+        projectRoot: jsOnlyRoot,
+      }).flatMap((result) => result.diagnostics);
+      assert(
+        jsOnlyDiagnostics.length === 0,
+        "NAT-001 ignores packages that ship no iOS podspec",
+      );
 
-      const disabledRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'code-verifier-natdisable-'));
-      fs.mkdirSync(path.join(disabledRoot, 'node_modules', 'expo-fake-picker', 'ios'), { recursive: true });
-      fs.writeFileSync(path.join(disabledRoot, 'node_modules', 'expo-fake-picker', 'ios', 'ExpoFakePicker.podspec'),
-        `Pod::Spec.new do |s|\n  s.name = 'ExpoFakePicker'\nend\n`);
-      fs.mkdirSync(path.join(disabledRoot, 'ios'), { recursive: true });
-      fs.writeFileSync(path.join(disabledRoot, 'ios', 'Podfile.lock'), 'PODS:\n  - "UnrelatedPod (1.0.0)"\n');
-      fs.mkdirSync(path.join(disabledRoot, 'src'), { recursive: true });
-      fs.writeFileSync(path.join(disabledRoot, 'src', 'App.tsx'), `import 'expo-fake-picker';\n`);
-      const disabledDiagnostics = verifyNativeConsistency([disabledRoot], { projectRoot: disabledRoot, disabledRules: ['NAT'] })
-        .flatMap((result) => result.diagnostics);
-      assert(disabledDiagnostics.length === 0,
-        'NAT-001 respects rule-family disabling');
+      const disabledRoot = fs.mkdtempSync(
+        path.join(os.tmpdir(), "code-verifier-natdisable-"),
+      );
+      fs.mkdirSync(
+        path.join(disabledRoot, "node_modules", "expo-fake-picker", "ios"),
+        { recursive: true },
+      );
+      fs.writeFileSync(
+        path.join(
+          disabledRoot,
+          "node_modules",
+          "expo-fake-picker",
+          "ios",
+          "ExpoFakePicker.podspec",
+        ),
+        `Pod::Spec.new do |s|\n  s.name = 'ExpoFakePicker'\nend\n`,
+      );
+      fs.mkdirSync(path.join(disabledRoot, "ios"), { recursive: true });
+      fs.writeFileSync(
+        path.join(disabledRoot, "ios", "Podfile.lock"),
+        'PODS:\n  - "UnrelatedPod (1.0.0)"\n',
+      );
+      fs.mkdirSync(path.join(disabledRoot, "src"), { recursive: true });
+      fs.writeFileSync(
+        path.join(disabledRoot, "src", "App.tsx"),
+        `import 'expo-fake-picker';\n`,
+      );
+      const disabledDiagnostics = verifyNativeConsistency([disabledRoot], {
+        projectRoot: disabledRoot,
+        disabledRules: ["NAT"],
+      }).flatMap((result) => result.diagnostics);
+      assert(
+        disabledDiagnostics.length === 0,
+        "NAT-001 respects rule-family disabling",
+      );
     }
 
-    const deployRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'code-verifier-deploy-'));
-    fs.mkdirSync(path.join(deployRoot, '.github', 'workflows'), { recursive: true });
-    fs.writeFileSync(path.join(deployRoot, '.github', 'workflows', 'ci.yml'), `
+    const deployRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "code-verifier-deploy-"),
+    );
+    fs.mkdirSync(path.join(deployRoot, ".github", "workflows"), {
+      recursive: true,
+    });
+    fs.writeFileSync(
+      path.join(deployRoot, ".github", "workflows", "ci.yml"),
+      `
       permissions: write-all
       jobs:
         test:
           steps:
             - uses: actions/checkout@v4
-    `);
-    fs.writeFileSync(path.join(deployRoot, 'Dockerfile'), `FROM node:22\nARG API_TOKEN\nRUN npm ci\n`);
-    fs.writeFileSync(path.join(deployRoot, 'deployment.yaml'), `
+    `,
+    );
+    fs.writeFileSync(
+      path.join(deployRoot, "Dockerfile"),
+      `FROM node:22\nARG API_TOKEN\nRUN npm ci\n`,
+    );
+    fs.writeFileSync(
+      path.join(deployRoot, "deployment.yaml"),
+      `
       apiVersion: apps/v1
       kind: Deployment
       spec:
@@ -1342,8 +2453,11 @@ async function runTests() {
               - name: api
                 securityContext:
                   allowPrivilegeEscalation: true
-    `);
-    fs.writeFileSync(path.join(deployRoot, 'main.tf'), `
+    `,
+    );
+    fs.writeFileSync(
+      path.join(deployRoot, "main.tf"),
+      `
       resource "aws_security_group" "admin" {
         ingress {
           from_port = 22
@@ -1352,86 +2466,139 @@ async function runTests() {
           cidr_blocks = ["0.0.0.0/0"]
         }
       }
-    `);
-    const deployment = verifyDeploymentConfigs([deployRoot], { projectRoot: deployRoot });
-    const deployDiagnostics = deployment.flatMap((result) => result.diagnostics);
-    assert(['SUP-001', 'SUP-002', 'SUP-003', 'SUP-004'].every((rule) =>
-      deployDiagnostics.some((finding) => finding.ruleId === rule)),
-    'Detects unpinned actions, broad permissions, Docker secrets, and root runtime');
-    assert(['IAC-001', 'IAC-002', 'IAC-003'].every((rule) =>
-      deployDiagnostics.some((finding) => finding.ruleId === rule)),
-    'Detects Kubernetes privilege hazards and public Terraform administrative ingress');
+    `,
+    );
+    const deployment = verifyDeploymentConfigs([deployRoot], {
+      projectRoot: deployRoot,
+    });
+    const deployDiagnostics = deployment.flatMap(
+      (result) => result.diagnostics,
+    );
+    assert(
+      ["SUP-001", "SUP-002", "SUP-003", "SUP-004"].every((rule) =>
+        deployDiagnostics.some((finding) => finding.ruleId === rule),
+      ),
+      "Detects unpinned actions, broad permissions, Docker secrets, and root runtime",
+    );
+    assert(
+      ["IAC-001", "IAC-002", "IAC-003"].every((rule) =>
+        deployDiagnostics.some((finding) => finding.ruleId === rule),
+      ),
+      "Detects Kubernetes privilege hazards and public Terraform administrative ingress",
+    );
 
-    const cacheFile = path.join(deployRoot, 'cache.json');
+    const cacheFile = path.join(deployRoot, "cache.json");
     const cache = new ScanCache(cacheFile);
-    cache.set('result', mobileResults[0]);
+    cache.set("result", mobileResults[0]);
     cache.save();
-    assert(new ScanCache(cacheFile).get('result')?.filePath === mobileResults[0].filePath,
-      'Persistent scan cache round-trips verification results');
+    assert(
+      new ScanCache(cacheFile).get("result")?.filePath ===
+        mobileResults[0].filePath,
+      "Persistent scan cache round-trips verification results",
+    );
     const signature = projectSignature([semanticFile]);
-    assert(fileCacheKey(semanticFile, signature, 'options') === fileCacheKey(semanticFile, signature, 'options'),
-      'Cache keys are deterministic');
-    const scheduled = await mapWithConcurrency([3, 1, 2], 2, async (value) => value * 2);
-    assert(scheduled.join(',') === '6,2,4', 'Concurrent scan pool preserves deterministic result order');
+    assert(
+      fileCacheKey(semanticFile, signature, "options") ===
+        fileCacheKey(semanticFile, signature, "options"),
+      "Cache keys are deterministic",
+    );
+    const scheduled = await mapWithConcurrency(
+      [3, 1, 2],
+      2,
+      async (value) => value * 2,
+    );
+    assert(
+      scheduled.join(",") === "6,2,4",
+      "Concurrent scan pool preserves deterministic result order",
+    );
   }
 
-  console.log('— CI Governance and Baselines');
+  console.log("— CI Governance and Baselines");
   {
     const source = `export function run(req: any) { exec(req.body.command); }`;
-    const first = await new CodeVerifier({ projectRoot: '/checkout-a' })
-      .verifyCode(source, '/checkout-a/src/run.ts');
-    const shifted = await new CodeVerifier({ projectRoot: '/checkout-b' })
-      .verifyCode(`\n\n${source}`, '/checkout-b/src/run.ts');
-    const firstFinding = first.diagnostics.find((d) => d.ruleId === 'SEC-007')!;
-    const shiftedFinding = shifted.diagnostics.find((d) => d.ruleId === 'SEC-007')!;
+    const first = await new CodeVerifier({
+      projectRoot: "/checkout-a",
+    }).verifyCode(source, "/checkout-a/src/run.ts");
+    const shifted = await new CodeVerifier({
+      projectRoot: "/checkout-b",
+    }).verifyCode(`\n\n${source}`, "/checkout-b/src/run.ts");
+    const firstFinding = first.diagnostics.find((d) => d.ruleId === "SEC-007")!;
+    const shiftedFinding = shifted.diagnostics.find(
+      (d) => d.ruleId === "SEC-007",
+    )!;
     assert(
       firstFinding.fingerprint === shiftedFinding.fingerprint,
-      'Fingerprint survives line shifts and checkout-root changes'
+      "Fingerprint survives line shifts and checkout-root changes",
     );
 
     const baselineVerifier = new CodeVerifier({
-      projectRoot: '/checkout-a',
+      projectRoot: "/checkout-a",
       baselineFingerprints: new Set([firstFinding.fingerprint!]),
     });
-    const suppressed = await baselineVerifier.verifyCode(source, '/checkout-a/src/run.ts');
+    const suppressed = await baselineVerifier.verifyCode(
+      source,
+      "/checkout-a/src/run.ts",
+    );
     assert(
-      suppressed.diagnostics.length === 0 && suppressed.stats.baselineSuppressed === 1 && suppressed.status === 'PASSED',
-      'Baseline suppresses an existing finding and reports the count'
+      suppressed.diagnostics.length === 0 &&
+        suppressed.stats.baselineSuppressed === 1 &&
+        suppressed.status === "PASSED",
+      "Baseline suppresses an existing finding and reports the count",
     );
 
-    const threshold = await new CodeVerifier({ failOn: 'HIGH' })
-      .verifyCode(`function f(u: { a: number } | null) { return u.a; }`, 'threshold.ts');
-    assert(
-      threshold.diagnostics.some((d) => d.severity === 'MEDIUM') && threshold.status === 'PASSED',
-      'HIGH failure threshold keeps MEDIUM findings advisory'
+    const threshold = await new CodeVerifier({ failOn: "HIGH" }).verifyCode(
+      `function f(u: { a: number } | null) { return u.a; }`,
+      "threshold.ts",
     );
-    const lowThreshold = await new CodeVerifier({ failOn: 'LOW' })
-      .verifyCode(`function f() { debugger; }`, 'threshold-low.ts');
-    assert(lowThreshold.status === 'FAILED', 'LOW failure threshold blocks LOW findings');
+    assert(
+      threshold.diagnostics.some((d) => d.severity === "MEDIUM") &&
+        threshold.status === "PASSED",
+      "HIGH failure threshold keeps MEDIUM findings advisory",
+    );
+    const lowThreshold = await new CodeVerifier({ failOn: "LOW" }).verifyCode(
+      `function f() { debugger; }`,
+      "threshold-low.ts",
+    );
+    assert(
+      lowThreshold.status === "FAILED",
+      "LOW failure threshold blocks LOW findings",
+    );
 
     const ordered = await verifier.verifyCode(
       `function f() { debugger; }\nconst apiUrl = 'http://private.example.dev';`,
-      'ordered.ts'
+      "ordered.ts",
     );
     assert(
-      ordered.diagnostics.every((item, index, items) => index === 0 ||
-        items[index - 1].loc.start.line <= item.loc.start.line),
-      'Diagnostics are emitted in deterministic source order'
+      ordered.diagnostics.every(
+        (item, index, items) =>
+          index === 0 || items[index - 1].loc.start.line <= item.loc.start.line,
+      ),
+      "Diagnostics are emitted in deterministic source order",
     );
 
     const sarif = JSON.parse(formatSARIF([first]));
     assert(
-      sarif.runs[0].results[0].partialFingerprints.codeVerifierFingerprint.length === 64,
-      'SARIF includes stable partial fingerprints'
+      sarif.runs[0].results[0].partialFingerprints.codeVerifierFingerprint
+        .length === 64,
+      "SARIF includes stable partial fingerprints",
     );
 
-    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'code-verifier-'));
-    const baselinePath = path.join(tempRoot, 'baseline.json');
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "code-verifier-"));
+    const baselinePath = path.join(tempRoot, "baseline.json");
     writeBaseline(baselinePath, [firstFinding, firstFinding]);
-    assert(loadBaseline(baselinePath).size === 1, 'Baseline files round-trip and deduplicate fingerprints');
-    fs.writeFileSync(path.join(tempRoot, '.codeverifier.json'), JSON.stringify({ failOn: 'URGENT', typo: true }));
+    assert(
+      loadBaseline(baselinePath).size === 1,
+      "Baseline files round-trip and deduplicate fingerprints",
+    );
+    fs.writeFileSync(
+      path.join(tempRoot, ".codeverifier.json"),
+      JSON.stringify({ failOn: "URGENT", typo: true }),
+    );
     const invalidConfig = loadConfig(tempRoot);
-    assert(invalidConfig.errors.length === 2, 'Invalid and unknown configuration values are rejected');
+    assert(
+      invalidConfig.errors.length === 2,
+      "Invalid and unknown configuration values are rejected",
+    );
   }
 
   console.log(`\n========================================`);
@@ -1444,6 +2611,6 @@ async function runTests() {
 }
 
 runTests().catch((err) => {
-  console.error('Fatal test error:', err);
+  console.error("Fatal test error:", err);
   process.exit(1);
 });
