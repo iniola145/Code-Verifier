@@ -1,0 +1,21 @@
+import { forward as passThrough, emptyUser, renamedForward, persist } from './helpers.fixture';
+import defaultForward from './helpers.fixture';
+import * as helpers from './helpers.fixture';
+import { throughBarrel, defaultThroughBarrel } from './barrel.fixture';
+import { throughBarrel as throughChain } from './barrel-chain.fixture';
+
+export function save(route: any) {
+  const raw = route.params.body;
+  const first = passThrough(raw);
+  const second = renamedForward(first);
+  const third = defaultForward(second);
+  const fourth = helpers.forward(third);
+  const fifth = throughBarrel(fourth);
+  const sixth = defaultThroughBarrel(fifth);
+  const seventh = throughChain(sixth);
+  AsyncStorage.setItem('cache', seventh);
+  persist(seventh);
+}
+
+const user = helpers.emptyUser();
+user.name;

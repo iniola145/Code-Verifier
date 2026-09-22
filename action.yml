@@ -1,0 +1,25 @@
+name: Code Verifier
+description: Run Code Verifier static analysis for TypeScript, React, React Native, Expo, and deployment configuration
+inputs:
+  targets:
+    description: Comma-separated files or directories to analyze
+    required: false
+    default: .
+  format:
+    description: Output format (sarif, json, summary, report, or llm)
+    required: false
+    default: sarif
+  fail-on:
+    description: Minimum severity that fails the action
+    required: false
+    default: MEDIUM
+  arguments:
+    description: Additional Code Verifier CLI arguments
+    required: false
+    default: ''
+runs:
+  using: node20
+  main: dist/action.js
+branding:
+  icon: shield
+  color: blue

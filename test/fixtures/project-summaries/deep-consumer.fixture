@@ -1,0 +1,6 @@
+import { wrapped, store } from './layer.fixture';
+
+export function saveDeep(route: any) {
+  const value = wrapped(route.params.body);
+  store(value);
+}

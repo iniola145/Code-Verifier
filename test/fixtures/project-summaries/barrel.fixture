@@ -1,0 +1,2 @@
+export { forward as throughBarrel } from './helpers.fixture';
+export { default as defaultThroughBarrel } from './helpers.fixture';

@@ -1,0 +1,6 @@
+import { forward, persist } from '@project/helpers.fixture';
+
+export function saveAliased(route: any) {
+  const raw = route.params.body;
+  persist(forward(raw));
+}

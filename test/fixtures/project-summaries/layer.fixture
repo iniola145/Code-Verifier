@@ -1,0 +1,9 @@
+import { forward, persist } from './helpers.fixture';
+
+export function wrapped<T>(value: T): T {
+  return forward(value);
+}
+
+export function store(value: string) {
+  persist(value);
+}
