@@ -2164,9 +2164,13 @@ async function runTests() {
       projectRoot: reactNodeRoot,
     });
     const reactNodeResult = await reactNodeVerifier.verifyFile(reactNodeFile);
+    const reactNodeConditions = reactNodeResult.diagnostics.filter(
+      (d) => d.ruleId === "TYPE-002",
+    );
     assert(
-      reactNodeResult.diagnostics.every((d) => d.ruleId !== "TYPE-002"),
-      "Wide UI unions with an ancillary Promise member (React 19 ReactNode) do not trigger TYPE-002",
+      reactNodeConditions.length === 1 &&
+        reactNodeConditions[0].codeSnippet === "maybePromise",
+      "Wide UI unions with an ancillary Promise member (React 19 ReactNode) do not trigger TYPE-002, but Promise | undefined still does",
     );
     assert(
       reactNodeResult.diagnostics.some(
