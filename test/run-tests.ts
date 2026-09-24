@@ -2135,6 +2135,46 @@ async function runTests() {
       "TypeScript semantic stage is visible and complete",
     );
 
+    const reactNodeRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "code-verifier-reactnode-"),
+    );
+    const reactNodeFile = path.join(reactNodeRoot, "union.ts");
+    fs.writeFileSync(
+      reactNodeFile,
+      `
+      // Mirrors React 19's ReactNode: a wide union with an ancillary Promise.
+      type ReactNode =
+        | string
+        | number
+        | boolean
+        | null
+        | undefined
+        | Promise<string>;
+      declare const fallback: ReactNode | ((props: { x: number }) => ReactNode);
+      declare const maybePromise: Promise<boolean> | undefined;
+      async function run() {
+        if (fallback) console.log('rendering');
+        while (fallback) console.log('looping');
+        if (maybePromise) console.log('always truthy when defined');
+      }
+    `,
+    );
+    const reactNodeVerifier = new CodeVerifier({
+      semanticAnalysisIndex: SemanticAnalysisIndex.fromFiles([reactNodeFile]),
+      projectRoot: reactNodeRoot,
+    });
+    const reactNodeResult = await reactNodeVerifier.verifyFile(reactNodeFile);
+    assert(
+      reactNodeResult.diagnostics.every((d) => d.ruleId !== "TYPE-002"),
+      "Wide UI unions with an ancillary Promise member (React 19 ReactNode) do not trigger TYPE-002",
+    );
+    assert(
+      reactNodeResult.diagnostics.some(
+        (d) => d.ruleId === "TYPE-002" && d.codeSnippet === "maybePromise",
+      ),
+      "Promise | undefined conditions still trigger TYPE-002",
+    );
+
     const mobileRoot = fs.mkdtempSync(
       path.join(os.tmpdir(), "code-verifier-mobile-"),
     );
