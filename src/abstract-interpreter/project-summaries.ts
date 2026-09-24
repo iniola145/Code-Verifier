@@ -1,16 +1,16 @@
-import * as path from 'path';
-import * as fs from 'fs';
-import * as t from '@babel/types';
-import ts from 'typescript';
-import { parseSourceCode } from '../parser/ast';
-import { buildFunctionSummaries, FunctionSummary } from './function-summaries';
+import * as path from "path";
+import * as fs from "fs";
+import * as t from "@babel/types";
+import ts from "typescript";
+import { parseSourceCode } from "../parser/ast";
+import { buildFunctionSummaries, FunctionSummary } from "./function-summaries";
 
 interface ModuleSummary {
   exports: Map<string, FunctionSummary>;
   ast: t.File;
 }
 
-const RESOLUTION_SUFFIXES = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
+const RESOLUTION_SUFFIXES = ["", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"];
 
 interface TsConfigResolution {
   directory: string;
@@ -37,7 +37,10 @@ export class ProjectSummaryIndex {
     return index;
   }
 
-  summariesForFile(ast: t.File, filePath: string): Map<string, FunctionSummary> {
+  summariesForFile(
+    ast: t.File,
+    filePath: string,
+  ): Map<string, FunctionSummary> {
     const summaries = new Map<string, FunctionSummary>();
     for (const statement of ast.program.body) {
       if (!t.isImportDeclaration(statement)) continue;
@@ -48,12 +51,22 @@ export class ProjectSummaryIndex {
 
       for (const specifier of statement.specifiers) {
         if (t.isImportSpecifier(specifier)) {
-          const imported = t.isIdentifier(specifier.imported) ? specifier.imported.name : specifier.imported.value;
+          const imported = t.isIdentifier(specifier.imported)
+            ? specifier.imported.name
+            : specifier.imported.value;
           const summary = module.exports.get(imported);
-          if (summary) summaries.set(specifier.local.name, { ...summary, name: specifier.local.name });
+          if (summary)
+            summaries.set(specifier.local.name, {
+              ...summary,
+              name: specifier.local.name,
+            });
         } else if (t.isImportDefaultSpecifier(specifier)) {
-          const summary = module.exports.get('default');
-          if (summary) summaries.set(specifier.local.name, { ...summary, name: specifier.local.name });
+          const summary = module.exports.get("default");
+          if (summary)
+            summaries.set(specifier.local.name, {
+              ...summary,
+              name: specifier.local.name,
+            });
         } else if (t.isImportNamespaceSpecifier(specifier)) {
           for (const [exportedName, summary] of module.exports) {
             summaries.set(`${specifier.local.name}.${exportedName}`, {
@@ -69,7 +82,10 @@ export class ProjectSummaryIndex {
 
   private indexFile(filePath: string): void {
     try {
-      const parsed = parseSourceCode(fs.readFileSync(filePath, 'utf8'), filePath);
+      const parsed = parseSourceCode(
+        fs.readFileSync(filePath, "utf8"),
+        filePath,
+      );
       const local = buildFunctionSummaries(parsed.ast);
       const exported = new Map<string, FunctionSummary>();
       for (const statement of parsed.ast.program.body) {
@@ -90,8 +106,11 @@ export class ProjectSummaryIndex {
           }
         } else if (t.isExportDefaultDeclaration(statement)) {
           const declaration = statement.declaration;
-          const name = (t.isFunctionDeclaration(declaration) && declaration.id) ? declaration.id.name : 'default';
-          if (local.has(name)) exported.set('default', local.get(name)!);
+          const name =
+            t.isFunctionDeclaration(declaration) && declaration.id
+              ? declaration.id.name
+              : "default";
+          if (local.has(name)) exported.set("default", local.get(name)!);
         }
       }
       this.modules.set(filePath, { exports: exported, ast: parsed.ast });
@@ -107,18 +126,34 @@ export class ProjectSummaryIndex {
       for (const [filePath, module] of this.modules) {
         for (const statement of module.ast.program.body) {
           if (t.isExportAllDeclaration(statement)) {
-            const targetPath = this.resolveImport(filePath, statement.source.value);
-            const target = targetPath ? this.modules.get(targetPath) : undefined;
+            const targetPath = this.resolveImport(
+              filePath,
+              statement.source.value,
+            );
+            const target = targetPath
+              ? this.modules.get(targetPath)
+              : undefined;
             if (!target) continue;
             for (const [exportedName, summary] of target.exports) {
-              if (exportedName === 'default' || module.exports.has(exportedName)) continue;
-              module.exports.set(exportedName, { ...summary, name: exportedName });
+              if (
+                exportedName === "default" ||
+                module.exports.has(exportedName)
+              )
+                continue;
+              module.exports.set(exportedName, {
+                ...summary,
+                name: exportedName,
+              });
               changed = true;
             }
             continue;
           }
-          if (!t.isExportNamedDeclaration(statement) || !statement.source) continue;
-          const targetPath = this.resolveImport(filePath, statement.source.value);
+          if (!t.isExportNamedDeclaration(statement) || !statement.source)
+            continue;
+          const targetPath = this.resolveImport(
+            filePath,
+            statement.source.value,
+          );
           const target = targetPath ? this.modules.get(targetPath) : undefined;
           if (!target) continue;
           for (const specifier of statement.specifiers) {
@@ -127,7 +162,10 @@ export class ProjectSummaryIndex {
             const exportedName = nodeName(specifier.exported);
             const summary = target.exports.get(importedName);
             if (exportedName && summary && !module.exports.has(exportedName)) {
-              module.exports.set(exportedName, { ...summary, name: exportedName });
+              module.exports.set(exportedName, {
+                ...summary,
+                name: exportedName,
+              });
               changed = true;
             }
           }
@@ -141,12 +179,18 @@ export class ProjectSummaryIndex {
     for (let pass = 0; pass < Math.min(this.modules.size + 1, 32); pass++) {
       let changed = false;
       for (const [filePath, module] of this.modules) {
-        const summaries = buildFunctionSummaries(module.ast, this.summariesForFile(module.ast, filePath));
+        const summaries = buildFunctionSummaries(
+          module.ast,
+          this.summariesForFile(module.ast, filePath),
+        );
         for (const [exportedName, localName] of exportBindings(module.ast)) {
           const summary = summaries.get(localName);
           if (!summary) continue;
           const next = { ...summary, name: exportedName };
-          if (JSON.stringify(module.exports.get(exportedName)) !== JSON.stringify(next)) {
+          if (
+            JSON.stringify(module.exports.get(exportedName)) !==
+            JSON.stringify(next)
+          ) {
             module.exports.set(exportedName, next);
             changed = true;
           }
@@ -158,17 +202,25 @@ export class ProjectSummaryIndex {
   }
 
   private resolveImport(fromFile: string, specifier: string): string | null {
-    if (specifier.startsWith('.')) {
-      return this.resolveCandidate(path.resolve(path.dirname(fromFile), specifier));
+    if (specifier.startsWith(".")) {
+      return this.resolveCandidate(
+        path.resolve(path.dirname(fromFile), specifier),
+      );
     }
-    const config = this.tsConfigs.find((candidate) => isInside(fromFile, candidate.directory));
+    const config = this.tsConfigs.find((candidate) =>
+      isInside(fromFile, candidate.directory),
+    );
     if (!config) return null;
     for (const [pattern, targets] of Object.entries(config.paths)) {
       const wildcard = matchPathPattern(pattern, specifier);
       if (wildcard === null) continue;
       for (const target of targets) {
-        const candidate = target.includes('*') ? target.replace('*', wildcard) : target;
-        const resolved = this.resolveCandidate(path.resolve(config.baseUrl, candidate));
+        const candidate = target.includes("*")
+          ? target.replace("*", wildcard)
+          : target;
+        const resolved = this.resolveCandidate(
+          path.resolve(config.baseUrl, candidate),
+        );
         if (resolved) return resolved;
       }
     }
@@ -190,14 +242,18 @@ export class ProjectSummaryIndex {
   private loadTsConfigs(): void {
     const seen = new Set<string>();
     for (const file of this.files) {
-      const configPath = ts.findConfigFile(path.dirname(file), fs.existsSync, 'tsconfig.json');
+      const configPath = ts.findConfigFile(
+        path.dirname(file),
+        fs.existsSync,
+        "tsconfig.json",
+      );
       if (!configPath || seen.has(configPath)) continue;
       seen.add(configPath);
       const loaded = ts.readConfigFile(configPath, ts.sys.readFile);
       if (loaded.error || !loaded.config) continue;
       const directory = path.dirname(configPath);
       const options = loaded.config.compilerOptions ?? {};
-      const baseUrl = path.resolve(directory, options.baseUrl ?? '.');
+      const baseUrl = path.resolve(directory, options.baseUrl ?? ".");
       this.tsConfigs.push({ directory, baseUrl, paths: options.paths ?? {} });
     }
     this.tsConfigs.sort((a, b) => b.directory.length - a.directory.length);
@@ -206,12 +262,15 @@ export class ProjectSummaryIndex {
 
 function isInside(file: string, directory: string): boolean {
   const relative = path.relative(directory, file);
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  return (
+    relative === "" ||
+    (!relative.startsWith("..") && !path.isAbsolute(relative))
+  );
 }
 
 function matchPathPattern(pattern: string, specifier: string): string | null {
-  const star = pattern.indexOf('*');
-  if (star < 0) return pattern === specifier ? '' : null;
+  const star = pattern.indexOf("*");
+  if (star < 0) return pattern === specifier ? "" : null;
   const prefix = pattern.slice(0, star);
   const suffix = pattern.slice(star + 1);
   if (!specifier.startsWith(prefix) || !specifier.endsWith(suffix)) return null;
@@ -219,9 +278,12 @@ function matchPathPattern(pattern: string, specifier: string): string | null {
 }
 
 function declarationNames(declaration: t.Declaration): string[] {
-  if (t.isFunctionDeclaration(declaration) && declaration.id) return [declaration.id.name];
+  if (t.isFunctionDeclaration(declaration) && declaration.id)
+    return [declaration.id.name];
   if (t.isVariableDeclaration(declaration)) {
-    return declaration.declarations.flatMap((item) => t.isIdentifier(item.id) ? [item.id.name] : []);
+    return declaration.declarations.flatMap((item) =>
+      t.isIdentifier(item.id) ? [item.id.name] : [],
+    );
   }
   return [];
 }
@@ -236,7 +298,8 @@ function exportBindings(ast: t.File): Array<[string, string]> {
   const bindings: Array<[string, string]> = [];
   for (const statement of ast.program.body) {
     if (t.isExportNamedDeclaration(statement) && statement.declaration) {
-      for (const name of declarationNames(statement.declaration)) bindings.push([name, name]);
+      for (const name of declarationNames(statement.declaration))
+        bindings.push([name, name]);
     } else if (t.isExportNamedDeclaration(statement) && !statement.source) {
       for (const specifier of statement.specifiers) {
         if (t.isExportSpecifier(specifier)) {
@@ -246,8 +309,11 @@ function exportBindings(ast: t.File): Array<[string, string]> {
       }
     } else if (t.isExportDefaultDeclaration(statement)) {
       const declaration = statement.declaration;
-      const local = t.isFunctionDeclaration(declaration) && declaration.id ? declaration.id.name : 'default';
-      bindings.push(['default', local]);
+      const local =
+        t.isFunctionDeclaration(declaration) && declaration.id
+          ? declaration.id.name
+          : "default";
+      bindings.push(["default", local]);
     }
   }
   return bindings;

@@ -1,7 +1,7 @@
-import * as t from '@babel/types';
-import { MemoryAbstractState } from '../types/verifier';
-import { MemoryState, NullabilityDomain } from './domain';
-import { SymbolTable } from './symbols';
+import * as t from "@babel/types";
+import { MemoryAbstractState } from "../types/verifier";
+import { MemoryState, NullabilityDomain } from "./domain";
+import { SymbolTable } from "./symbols";
 
 /**
  * Path-sensitive refinement of abstract memory states along CFG edges.
@@ -15,7 +15,7 @@ export function refineState(
   state: MemoryAbstractState,
   test: t.Node | undefined | null,
   polarity: boolean,
-  symbols?: SymbolTable
+  symbols?: SymbolTable,
 ): MemoryAbstractState {
   if (!test || !t.isExpression(test)) return state;
   const next = MemoryState.clone(state);
@@ -30,7 +30,7 @@ function refineExpression(
   expr: t.Expression,
   polarity: boolean,
   depth: number,
-  symbols?: SymbolTable
+  symbols?: SymbolTable,
 ): void {
   if (depth > MAX_REFINE_DEPTH) return;
 
@@ -60,34 +60,47 @@ function refineExpression(
   }
 
   // `if (!x)` — flip the polarity
-  if (t.isUnaryExpression(expr) && expr.operator === '!') {
+  if (t.isUnaryExpression(expr) && expr.operator === "!") {
     refineExpression(state, expr.argument, !polarity, depth + 1, symbols);
     return;
   }
 
   // `x !== null` / `x != null` / `x !== undefined`
-  if (t.isBinaryExpression(expr) && expr.operator === '!==') {
+  if (t.isBinaryExpression(expr) && expr.operator === "!==") {
     const nullishSide =
       t.isNullLiteral(expr.right) || isUndefinedIdentifier(expr.right)
-        ? 'right'
+        ? "right"
         : t.isNullLiteral(expr.left) || isUndefinedIdentifier(expr.left)
-          ? 'left'
+          ? "left"
           : null;
     if (nullishSide) {
-      const variable = nullishSide === 'right'
-        ? t.isIdentifier(expr.left) ? expr.left : null
-        : t.isIdentifier(expr.right) ? expr.right : null;
-      const undefinedSide = isUndefinedIdentifier(nullishSide === 'right' ? expr.right : expr.left);
+      const variable =
+        nullishSide === "right"
+          ? t.isIdentifier(expr.left)
+            ? expr.left
+            : null
+          : t.isIdentifier(expr.right)
+            ? expr.right
+            : null;
+      const undefinedSide = isUndefinedIdentifier(
+        nullishSide === "right" ? expr.right : expr.left,
+      );
       if (variable) {
         if (polarity) setNonNull(state, variable, symbols);
-        else setNullability(state, variable, undefinedSide ? 'Undefined' : 'Null', symbols);
+        else
+          setNullability(
+            state,
+            variable,
+            undefinedSide ? "Undefined" : "Null",
+            symbols,
+          );
       }
       return;
     }
   }
 
   // `x != null` / `x != undefined` (loose) — true ⇒ non-nullish.
-  if (t.isBinaryExpression(expr) && expr.operator === '!=') {
+  if (t.isBinaryExpression(expr) && expr.operator === "!=") {
     if (isNullish(expr.right) || isNullish(expr.left)) {
       const variable = t.isIdentifier(expr.left)
         ? expr.left
@@ -96,33 +109,37 @@ function refineExpression(
           : null;
       if (variable) {
         if (polarity) setNonNull(state, variable, symbols);
-        else setNullability(state, variable, 'Nullable', symbols);
+        else setNullability(state, variable, "Nullable", symbols);
       }
     }
     return;
   }
 
   // `typeof x === 'undefined'` / `typeof x !== 'undefined'`
-  if (t.isBinaryExpression(expr) && (expr.operator === '===' || expr.operator === '!==')) {
-    const typeofSide = t.isUnaryExpression(expr.left, { operator: 'typeof' })
-      ? 'left'
-      : t.isUnaryExpression(expr.right, { operator: 'typeof' })
-        ? 'right'
+  if (
+    t.isBinaryExpression(expr) &&
+    (expr.operator === "===" || expr.operator === "!==")
+  ) {
+    const typeofSide = t.isUnaryExpression(expr.left, { operator: "typeof" })
+      ? "left"
+      : t.isUnaryExpression(expr.right, { operator: "typeof" })
+        ? "right"
         : null;
     if (typeofSide) {
-      const other = typeofSide === 'left' ? expr.right : expr.left;
+      const other = typeofSide === "left" ? expr.right : expr.left;
       if (t.isStringLiteral(other)) {
         const arg =
-          typeofSide === 'left'
+          typeofSide === "left"
             ? (expr.left as t.UnaryExpression).argument
             : (expr.right as t.UnaryExpression).argument;
         const variable = t.isIdentifier(arg) ? arg : null;
-        if (variable && other.value === 'undefined') {
-          const isUndefined = (expr.operator === '===') === polarity;
-          if (isUndefined) setNullability(state, variable, 'Undefined', symbols);
+        if (variable && other.value === "undefined") {
+          const isUndefined = (expr.operator === "===") === polarity;
+          if (isUndefined)
+            setNullability(state, variable, "Undefined", symbols);
           else setNonNull(state, variable, symbols);
         } else {
-          const equalityHolds = (expr.operator === '===') === polarity;
+          const equalityHolds = (expr.operator === "===") === polarity;
           // Any successful typeof comparison against a concrete runtime type
           // other than "undefined" proves the value is non-nullish.
           if (variable && equalityHolds) setNonNull(state, variable, symbols);
@@ -137,7 +154,7 @@ function refineExpression(
   // (e.g. `arr.length > 0` proves arr non-null).
   if (
     t.isBinaryExpression(expr) &&
-    ['<', '>', '<=', '>=', 'in', 'instanceof'].includes(expr.operator)
+    ["<", ">", "<=", ">=", "in", "instanceof"].includes(expr.operator)
   ) {
     narrowMemberBases(state, expr.left, depth + 1, symbols);
     narrowMemberBases(state, expr.right, depth + 1, symbols);
@@ -145,29 +162,46 @@ function refineExpression(
   }
 
   // `x == null` (loose) matches both null and undefined
-  if (t.isBinaryExpression(expr) && expr.operator === '==' && isNullish(expr.right)) {
+  if (
+    t.isBinaryExpression(expr) &&
+    expr.operator === "==" &&
+    isNullish(expr.right)
+  ) {
     const variable = t.isIdentifier(expr.left) ? expr.left : null;
     if (variable) {
-      if (polarity) setNullability(state, variable, 'Nullable', symbols);
+      if (polarity) setNullability(state, variable, "Nullable", symbols);
       else setNonNull(state, variable, symbols);
     }
     return;
   }
 
   // `x === null` / `x === undefined` / `x === someNullVar`
-  if (t.isBinaryExpression(expr) && (expr.operator === '===' || expr.operator === '==')) {
+  if (
+    t.isBinaryExpression(expr) &&
+    (expr.operator === "===" || expr.operator === "==")
+  ) {
     if (t.isNullLiteral(expr.right) || isNullish(expr.right)) {
       const variable = t.isIdentifier(expr.left) ? expr.left : null;
       if (variable) {
-        if (polarity) setNullability(state, variable, t.isNullLiteral(expr.right) ? 'Null' : 'Nullable', symbols);
+        if (polarity)
+          setNullability(
+            state,
+            variable,
+            t.isNullLiteral(expr.right) ? "Null" : "Nullable",
+            symbols,
+          );
         else setNonNull(state, variable, symbols);
       }
       return;
     }
     if (isUndefinedIdentifier(expr.right) || isUndefinedIdentifier(expr.left)) {
-      const variable = t.isIdentifier(expr.left) ? expr.left : t.isIdentifier(expr.right) ? expr.right : null;
+      const variable = t.isIdentifier(expr.left)
+        ? expr.left
+        : t.isIdentifier(expr.right)
+          ? expr.right
+          : null;
       if (variable) {
-        if (polarity) setNullability(state, variable, 'Undefined', symbols);
+        if (polarity) setNullability(state, variable, "Undefined", symbols);
         else setNonNull(state, variable, symbols);
       }
       return;
@@ -176,7 +210,7 @@ function refineExpression(
   }
 
   // `a && b` assumed true refines both sides; assumed false proves nothing
-  if (t.isLogicalExpression(expr) && expr.operator === '&&') {
+  if (t.isLogicalExpression(expr) && expr.operator === "&&") {
     if (polarity) {
       refineExpression(state, expr.left, true, depth + 1, symbols);
       refineExpression(state, expr.right, true, depth + 1, symbols);
@@ -185,7 +219,7 @@ function refineExpression(
   }
 
   // `a || b` assumed false refines both sides; assumed true proves nothing
-  if (t.isLogicalExpression(expr) && expr.operator === '||') {
+  if (t.isLogicalExpression(expr) && expr.operator === "||") {
     if (!polarity) {
       refineExpression(state, expr.left, false, depth + 1, symbols);
       refineExpression(state, expr.right, false, depth + 1, symbols);
@@ -194,33 +228,43 @@ function refineExpression(
   }
 
   // `x ?? fallback` assumed true (well-defined) implies x is non-nullish
-  if (t.isLogicalExpression(expr) && expr.operator === '??') {
-    if (polarity && t.isIdentifier(expr.left)) setNonNull(state, expr.left, symbols);
+  if (t.isLogicalExpression(expr) && expr.operator === "??") {
+    if (polarity && t.isIdentifier(expr.left))
+      setNonNull(state, expr.left, symbols);
     return;
   }
 }
 
-function setNonNull(state: MemoryAbstractState, variable: t.Identifier, symbols?: SymbolTable): void {
-  setNullability(state, variable, 'NonNull', symbols);
+function setNonNull(
+  state: MemoryAbstractState,
+  variable: t.Identifier,
+  symbols?: SymbolTable,
+): void {
+  setNullability(state, variable, "NonNull", symbols);
 }
 
-function setNullability(state: MemoryAbstractState, variable: t.Identifier, value: any, symbols?: SymbolTable): void {
+function setNullability(
+  state: MemoryAbstractState,
+  variable: t.Identifier,
+  value: any,
+  symbols?: SymbolTable,
+): void {
   const key = symbols?.key(variable) ?? variable.name;
   const current = MemoryState.get(state, key);
   // Refinement runs on a per-edge clone, so narrowing a definite fact is
   // sound: `if (!x) return;` proves x is non-null on the fall-through even
   // when x was Null before (that fact describes OTHER paths). We only refuse
   // to WEAKEN an existing concrete fact (Null -> Nullable etc.).
-  if (value === 'NonNull') {
+  if (value === "NonNull") {
     state.set(key, { ...current, nullability: value });
     return;
   }
-  if (current.nullability !== 'Top' && current.nullability !== 'Bottom') return;
+  if (current.nullability !== "Top" && current.nullability !== "Bottom") return;
   state.set(key, { ...current, nullability: value });
 }
 
 function isUndefinedIdentifier(expr: t.Node): boolean {
-  return t.isIdentifier(expr) && expr.name === 'undefined';
+  return t.isIdentifier(expr) && expr.name === "undefined";
 }
 
 /**
@@ -231,7 +275,7 @@ function narrowMemberBases(
   state: MemoryAbstractState,
   expr: t.Node,
   depth: number,
-  symbols?: SymbolTable
+  symbols?: SymbolTable,
 ): void {
   if (!expr || depth > MAX_REFINE_DEPTH) return;
   if (isMemberLike(expr)) {
@@ -241,14 +285,14 @@ function narrowMemberBases(
     }
     return;
   }
-  if (t.isUnaryExpression(expr) && expr.operator === '!') {
+  if (t.isUnaryExpression(expr) && expr.operator === "!") {
     narrowMemberBases(state, expr.argument, depth + 1, symbols);
   }
 }
 
 /** `a.b.c` -> `a` (root identifier of a member chain). */
 function baseIdentifierOf(
-  expr: t.MemberExpression | t.OptionalMemberExpression
+  expr: t.MemberExpression | t.OptionalMemberExpression,
 ): t.Identifier | null {
   let cur: t.Expression = expr;
   while (isMemberLike(cur)) cur = cur.object;
@@ -257,7 +301,7 @@ function baseIdentifierOf(
 
 /** `x?.y` is a distinct Babel node type — every member check needs both. */
 function isMemberLike(
-  expr: t.Node
+  expr: t.Node,
 ): expr is t.MemberExpression | t.OptionalMemberExpression {
   return t.isMemberExpression(expr) || t.isOptionalMemberExpression(expr);
 }
