@@ -13,7 +13,7 @@ A static verification and security engine for **React, React Native, and Expo** 
      - **Nullability**: proves/flags actual null/undefined dereferences (CWE-476).
      - **Taint tracking**: source→sink flows from deep links, navigation params, and unencrypted storage into `AsyncStorage`/WebView sinks (CWE-312 / CWE-79).
      - **Interval domain**: numeric bounds with widening; used internally and surfaced in invariants.
-2. **Implemented TypeScript / React / React Native / Expo / Web Rules** (67 rules)
+2. **Implemented TypeScript / React / React Native / Expo / Web Rules** (79 rules)
    | Rule | Check | CWE |
    |---|---|---|
    | `RN-SEC-001` | Sensitive data in unencrypted `AsyncStorage` | CWE-312 |
@@ -49,6 +49,18 @@ A static verification and security engine for **React, React Native, and Expo** 
    | `REACT-006` | Effect timer captures stale state instead of using a functional update | React state |
    | `REACT-007` | Ref `.current` read or written during render (React 19.2+ throws "Cannot access refs during render"; includes the `useRef(new Animated.Value(1)).current` idiom) | React refs |
    | `REACT-008` | State variable declared but never read (set-but-never-rendered state), or state whose setter is never called (constant state) | React state |
+   | `REACT-009` | Removed ReactDOM / ReactDOMServer APIs called: `render`, `hydrate`, `unmountComponentAtNode`, `findDOMNode`, `unstable_renderSubtreeIntoContainer`, node-stream renderers (throws at runtime) | React 19 upgrade |
+   | `REACT-010` | `React.createFactory(...)` called (removed in React 19) | React 19 upgrade |
+   | `REACT-011` | String ref on a JSX element (`ref="name"` — removed in React 19, the ref never resolves) | React 19 upgrade |
+   | `REACT-012` | Legacy Context members `contextTypes`, `childContextTypes`, `getChildContext` (removed in React 19) | React 19 upgrade |
+   | `REACT-013` | `defaultProps` assigned on a function component (removed for function components in React 19 — defaults silently ignored; class components exempt) | React 19 upgrade |
+   | `REACT-014` | `propTypes` declared on a component (React 19 no longer validates them — checks silently disappear) | React 19 upgrade |
+   | `REACT-015` | `useRef()` called without an initial value (type error under @types/react 19; `.current` starts undefined) | React 19 types |
+   | `REACT-016` | `use(...)` called inside a try clause (React throws "Hooks cannot be called inside try clauses") | React 19 hooks |
+   | `REACT-017` | Callback ref implicitly returns a non-function value (React 19 cleanup-function semantics) | React 19 refs |
+   | `REACT-018` | Import from `react-dom/test-utils` (removed in React 19; `act` moved to `React.act`) | React 19 testing |
+   | `REACT-019` | `forwardRef` wrapper no longer needed — React 19 passes `ref` as a regular prop (advisory; forwardRef still works for React < 19 consumers) | React 19 upgrade |
+   | `REACT-020` | Module defines components **and** exports non-component values (route tables, config objects, helpers) — Fast Refresh (Vite/Metro) cannot hot-swap it, so edits fall back to a full reload and drop state. Type exports, hook exports, re-exports, and primitive constant exports are exempt | Fast Refresh |
    | `HYG-002` | `const`/`let` or function declaration never referenced afterwards (or assigned but never read); exports, destructuring, and `_`-prefixed names exempt | Dead code |
    | `RN-COR-001` | FlatList or SectionList key extractor returns the item index | React Native lists |
    | `RN-COR-002` | Mixed `useNativeDriver` values within one `Animated.parallel`/`sequence`/`stagger` group | React Native animations |
@@ -224,13 +236,13 @@ Also available: `// code-verifier-disable` (this + next line) and `// code-verif
 npm test
 ```
 
-275 tests: logic, async, compiler-backed Promise semantics, multi-layer interprocedural and object-field flows, Expo/native, IaC, and supply-chain configuration, backend/API correctness, persistent caching and scheduling, React/React Native correctness, React Native animation driver/latch and pan-responder capture rules, reliability, code-quality, CWE checks, bounded field sensitivity, recursive/destructured/callback taint propagation, lexical-shadowing regressions, TypeScript-annotation nullability seeding, path aliases, crash-proofing, completion status, registry coverage, baselines, stable SARIF fingerprints, suppressions, lattice tests, manifest-rule calibration regressions (launcher activities, scoped backup rules, debug overlays), Expo Router route and Podfile.lock native-consistency regressions, render-phase ref-access and unused-declaration (including nested-in-exported-component) regressions, and formatters.
+306 tests: logic, async, compiler-backed Promise semantics, multi-layer interprocedural and object-field flows, Expo/native, IaC, and supply-chain configuration, backend/API correctness, persistent caching and scheduling, React/React Native correctness, React Native animation driver/latch and pan-responder capture rules, reliability, code-quality, CWE checks, bounded field sensitivity, recursive/destructured/callback taint propagation, lexical-shadowing regressions, TypeScript-annotation nullability seeding, path aliases, crash-proofing, completion status, registry coverage, baselines, stable SARIF fingerprints, suppressions, lattice tests, manifest-rule calibration regressions (launcher activities, scoped backup rules, debug overlays), Expo Router route and Podfile.lock native-consistency regressions, render-phase ref-access and unused-declaration (including nested-in-exported-component) regressions, React 19 upgrade regressions (removed ReactDOM APIs, createFactory, string refs, legacy context, function-component defaultProps, propTypes, useRef argument, use-in-try, ref-callback returns, test-utils, forwardRef), Fast Refresh mixed-exports regressions, and formatters.
 
 `npm run benchmark` runs labeled vulnerable/fixed and mutation-style pairs, reports precision, recall, and F1, and fails below 95% precision or recall. The benchmark is a regression gate for its selected cases, not a claim of universal real-world accuracy.
 
 ## ⚠️ Honest limitations
 
-- The 67 rules cover selected correctness, reliability, quality, framework, platform/deployment configuration, supply-chain, API, and CWE classes; they do not guarantee defect-free or secure software. Use this verifier alongside type checking, linting, tests, dependency scanning, platform tooling, and review.
+- The 79 rules cover selected correctness, reliability, quality, framework, platform/deployment configuration, supply-chain, API, and CWE classes; they do not guarantee defect-free or secure software. Use this verifier alongside type checking, linting, tests, dependency scanning, platform tooling, and review.
 - The transfer function models assignments of literals, identifiers, arithmetic, `await`, logicals, unary, and property reads. Unmodeled expressions become `Top` — **unknown values are never reported as null dereferences**, so precision is limited but reports are trustworthy.
 - Taint sources/sinks remain a curated list; anything outside it (for example arbitrary `fetch` responses) is not automatically treated as tainted. Field paths, expression recursion, destructuring, standard collection callbacks, and parameter-to-return/sink summaries are bounded to keep scans terminating and findings explainable.
 - Cross-file analysis follows relative ESM imports/re-exports and TypeScript `baseUrl`/`paths` mappings only when the resolved target is already in the analyzed file set. External packages, mutable module state, dynamic property names, and general interprocedural control flow are not modeled.

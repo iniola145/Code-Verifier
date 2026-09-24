@@ -818,6 +818,242 @@ export function collectJsxIdentifierNames(ctx: RuleContext): Set<string> {
   return names;
 }
 
+// -------------------------------------------------------------------------
+// REACT-020: Fast Refresh mixed exports — a module that defines components
+// and also exports non-component values cannot be hot-swapped (Vite and
+// Metro both fall back to a full reload and drop component state).
+// -------------------------------------------------------------------------
+
+/** True when the function body renders JSX directly (nested functions excluded). */
+function functionRendersJsx(fn: t.Function): boolean {
+  let found = false;
+  const walk = (node: t.Node | null | undefined): void => {
+    if (!node || found || !node.type) return;
+    if (node !== fn.body && t.isFunction(node)) return;
+    if (t.isJSXElement(node) || t.isJSXFragment(node)) {
+      found = true;
+      return;
+    }
+    for (const key of t.VISITOR_KEYS[node.type] ?? []) {
+      const value = (node as unknown as Record<string, unknown>)[key];
+      if (Array.isArray(value)) value.forEach((child) => walk(child as t.Node));
+      else walk(value as t.Node);
+    }
+  };
+  walk(fn.body);
+  return found;
+}
+
+function extendsReactComponent(node: t.ClassDeclaration): boolean {
+  const superClass = node.superClass;
+  if (!superClass) return false;
+  const baseNames = ["Component", "PureComponent"];
+  if (t.isIdentifier(superClass)) return baseNames.includes(superClass.name);
+  return (
+    t.isMemberExpression(superClass) &&
+    !superClass.computed &&
+    t.isIdentifier(superClass.object) &&
+    t.isIdentifier(superClass.property) &&
+    baseNames.includes(superClass.property.name)
+  );
+}
+
+/** Unwrap TS `as` / `satisfies` / `!` wrappers before classification. */
+function unwrapTsExpression(node: t.Node): t.Node {
+  let current = node;
+  while (
+    t.isTSAsExpression(current) ||
+    t.isTSSatisfiesExpression(current) ||
+    t.isTSNonNullExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+/**
+ * Primitive constant exports ("export const VERSION = '1.0'") are tolerated
+ * beside components — the same allowance react-refresh's allowConstantExport
+ * gives, because they can be inlined without breaking hot reload. Objects,
+ * arrays, and calls are not.
+ */
+function isAllowedConstantExport(node: t.Node | null | undefined): boolean {
+  if (!node) return false;
+  const current = unwrapTsExpression(node);
+  if (
+    t.isStringLiteral(current) ||
+    t.isNumericLiteral(current) ||
+    t.isBooleanLiteral(current) ||
+    t.isNullLiteral(current)
+  )
+    return true;
+  if (t.isTemplateLiteral(current))
+    return current.expressions.every(
+      (expr) => t.isStringLiteral(expr) || t.isNumericLiteral(expr),
+    );
+  if (
+    t.isUnaryExpression(current) &&
+    (current.operator === "-" || current.operator === "+")
+  )
+    return isAllowedConstantExport(current.argument);
+  if (t.isBinaryExpression(current))
+    return (
+      isAllowedConstantExport(current.left) &&
+      isAllowedConstantExport(current.right)
+    );
+  return false;
+}
+
+export const FastRefreshMixedExportsRule: VerificationRule = {
+  id: "REACT-020",
+  name: "Fast Refresh Mixed Exports",
+  description:
+    "Detects a module that both defines React components and exports non-component values (route tables, config objects, helpers) — Fast Refresh can only hot-swap modules whose exports are all components, so edits fall back to a full reload and drop state.",
+  category: "REACT_HOOKS",
+  defaultSeverity: "MEDIUM",
+  check(ctx) {
+    // Pass 1: collect module-scope component definitions, exported or not.
+    const componentDefs = new Set<string>();
+
+    const atModuleScope = (path: NodePath<t.Node>): boolean => {
+      const parent = path.parentPath;
+      if (!parent) return false;
+      if (
+        t.isProgram(parent.node) ||
+        t.isExportNamedDeclaration(parent.node) ||
+        t.isExportDefaultDeclaration(parent.node)
+      )
+        return true;
+      // Declarators: VariableDeclarator -> VariableDeclaration -> (Program | export)
+      if (t.isVariableDeclaration(parent.node) && parent.parentPath)
+        return (
+          t.isProgram(parent.parentPath.node) ||
+          t.isExportNamedDeclaration(parent.parentPath.node) ||
+          t.isExportDefaultDeclaration(parent.parentPath.node)
+        );
+      return false;
+    };
+
+    traverse(ctx.ast, {
+      FunctionDeclaration(path) {
+        const id = path.node.id;
+        if (!id || !/^[A-Z]/.test(id.name) || !functionRendersJsx(path.node)) return;
+        if (atModuleScope(path)) componentDefs.add(id.name);
+      },
+      ClassDeclaration(path) {
+        const id = path.node.id;
+        if (!id || !/^[A-Z]/.test(id.name) || !extendsReactComponent(path.node)) return;
+        if (atModuleScope(path)) componentDefs.add(id.name);
+      },
+      VariableDeclarator(path) {
+        const id = path.node.id;
+        if (!t.isIdentifier(id) || !/^[A-Z]/.test(id.name)) return;
+        if (!atModuleScope(path)) return;
+        const init = path.node.init;
+        if (!init) return;
+        if (t.isFunction(init) && functionRendersJsx(init)) {
+          componentDefs.add(id.name);
+          return;
+        }
+        // memo(...) / forwardRef(...) wrappers.
+        if (t.isCallExpression(init) && init.arguments.length > 0) {
+          const first = init.arguments[0];
+          if (t.isFunction(first) && functionRendersJsx(first))
+            componentDefs.add(id.name);
+          else if (t.isIdentifier(first) && componentDefs.has(first.name))
+            componentDefs.add(id.name);
+        }
+      },
+    });
+
+    // Files with no component definitions are data/helper modules — fine.
+    if (componentDefs.size === 0) return;
+
+    const flag = (node: t.Node, name: string): void => {
+      emit(
+        ctx,
+        node,
+        "REACT-020",
+        "MEDIUM",
+        `Fast refresh only works when a file only exports components — '${name}' is a non-component export in a file that also defines components.`,
+        "React Fast Refresh (Vite) and Metro (Expo/React Native) hot-swap a module by replacing its component exports. A module that mixes component definitions with non-component exports cannot be hot-swapped: edits fall back to a full reload, and every component in the module tree loses its state.",
+        `Move '${name}' and any other non-component exports into their own module, or move the component definitions into a separate file.`,
+      );
+    };
+
+    const isHookName = (name: string): boolean => name.startsWith("use");
+    const isTypeBinding = (path: NodePath, name: string): boolean => {
+      const binding = path.scope.getBinding(name);
+      if (!binding) return false;
+      return (
+        binding.path.isTSTypeAliasDeclaration() ||
+        binding.path.isTSInterfaceDeclaration()
+      );
+    };
+
+    // Pass 2: classify the module's exports against the component set.
+    traverse(ctx.ast, {
+      ExportNamedDeclaration(path) {
+        // Re-exports (`export { X } from './y'`) describe other modules.
+        if (path.node.exportKind === "type" || path.node.source) return;
+        const decl = path.node.declaration;
+        if (decl) {
+          if (t.isVariableDeclaration(decl)) {
+            for (const declarator of decl.declarations) {
+              if (!t.isIdentifier(declarator.id)) continue;
+              const name = declarator.id.name;
+              if (componentDefs.has(name) || isHookName(name)) continue;
+              if (isAllowedConstantExport(declarator.init)) continue;
+              flag(declarator.id, name);
+            }
+          } else if (t.isFunctionDeclaration(decl) && decl.id) {
+            if (!componentDefs.has(decl.id.name) && !isHookName(decl.id.name))
+              flag(decl.id, decl.id.name);
+          } else if (t.isClassDeclaration(decl) && decl.id) {
+            if (!componentDefs.has(decl.id.name)) flag(decl.id, decl.id.name);
+          } else if (t.isTSEnumDeclaration(decl) && decl.id) {
+            flag(decl.id, decl.id.name);
+          }
+          // TS interface/type-alias declarations are type-only — skip.
+        }
+        for (const spec of path.node.specifiers) {
+          if (!t.isExportSpecifier(spec)) continue;
+          const exportedName = t.isIdentifier(spec.exported)
+            ? spec.exported.name
+            : t.isStringLiteral(spec.exported)
+              ? spec.exported.value
+              : null;
+          if (
+            !exportedName ||
+            componentDefs.has(exportedName) ||
+            isHookName(exportedName)
+          )
+            continue;
+          const local = t.isIdentifier(spec.local) ? spec.local.name : exportedName;
+          if (isTypeBinding(path, local)) continue;
+          flag(spec, exportedName);
+        }
+      },
+      ExportDefaultDeclaration(path) {
+        const decl = path.node.declaration;
+        if (t.isTSInterfaceDeclaration(decl) || t.isTSTypeAliasDeclaration(decl)) return;
+        if (t.isFunction(decl)) {
+          if (!functionRendersJsx(decl)) flag(decl, "default export");
+          return;
+        }
+        if (t.isCallExpression(decl)) return; // memo(...)/forwardRef(...) default export
+        if (t.isIdentifier(decl)) {
+          if (componentDefs.has(decl.name) || isHookName(decl.name)) return;
+          if (isTypeBinding(path, decl.name)) return;
+          flag(decl, decl.name);
+          return;
+        }
+        flag(decl, "default export");
+      },
+    });
+  },
+};
+
 export const REACT_CORRECTNESS_RULES: VerificationRule[] = [
   AsyncEffectRule,
   ArrayIndexKeyRule,
@@ -828,4 +1064,5 @@ export const REACT_CORRECTNESS_RULES: VerificationRule[] = [
   PanResponderCaptureRule,
   RefAccessDuringRenderRule,
   UnusedStateRule,
+  FastRefreshMixedExportsRule,
 ];

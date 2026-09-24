@@ -1,4 +1,4 @@
-import { VerificationRule } from '../types/verifier';
+import { VerificationRule } from "../types/verifier";
 export declare const TargetBlankRule: VerificationRule;
 export declare const DebuggerRule: VerificationRule;
 export declare const InsecureHttpUrlRule: VerificationRule;

@@ -410,6 +410,79 @@ const METADATA: Record<string, MetadataFields> = {
     frameworks: ["REACT_NATIVE", "EXPO"],
     documentationUrl: "https://docs.expo.dev/modules/autolinking/",
   },
+  "REACT-009": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
+    documentationUrl: "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
+  },
+  "REACT-010": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
+    documentationUrl: "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
+  },
+  "REACT-011": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
+    documentationUrl: "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
+  },
+  "REACT-012": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
+    documentationUrl: "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
+  },
+  "REACT-013": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
+    documentationUrl: "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
+  },
+  "REACT-014": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
+    documentationUrl: "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
+  },
+  "REACT-015": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
+    documentationUrl: "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
+  },
+  "REACT-016": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
+    documentationUrl: "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
+  },
+  "REACT-017": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
+    documentationUrl: "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
+  },
+  "REACT-018": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["REACT", "WEB"],
+    documentationUrl: "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
+  },
+  "REACT-019": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
+    documentationUrl: "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
+  },
+  "REACT-020": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
+    documentationUrl:
+      "https://github.com/ArnaudBarre/eslint-plugin-react-refresh",
+  },
 };
 
 function metadataFor(rule: VerificationRule): RuleMetadata {

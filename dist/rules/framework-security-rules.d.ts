@@ -1,4 +1,4 @@
-import { VerificationRule } from '../types/verifier';
+import { VerificationRule } from "../types/verifier";
 export declare const UnsafeWebViewSettingsRule: VerificationRule;
 export declare const WildcardPostMessageRule: VerificationRule;
 export declare const DisabledTlsVerificationRule: VerificationRule;

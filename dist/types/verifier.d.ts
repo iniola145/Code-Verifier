@@ -1,12 +1,12 @@
-import type { SymbolTable } from '../abstract-interpreter/symbols';
-import type { FunctionSummary } from '../abstract-interpreter/function-summaries';
-export type DiagnosticCategory = 'SECURITY' | 'CORRECTNESS' | 'PERFORMANCE' | 'REACT_HOOKS' | 'REACT_NATIVE_EXPO';
-export type DiagnosticSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
-export type DiagnosticConfidence = 'HIGH' | 'MEDIUM' | 'LOW';
-export type VerificationStatus = 'PASSED' | 'FAILED' | 'INCOMPLETE';
-export type CheckStatus = 'PASSED' | 'FAILED' | 'INCOMPLETE' | 'SKIPPED';
-export type AnalysisRequirement = 'AST' | 'CFG' | 'ABSTRACT_INTERPRETATION' | 'TYPE_INFORMATION' | 'PROJECT_CONTEXT';
-export type SupportedFramework = 'TYPESCRIPT' | 'REACT' | 'WEB' | 'REACT_NATIVE' | 'EXPO';
+import type { SymbolTable } from "../abstract-interpreter/symbols";
+import type { FunctionSummary } from "../abstract-interpreter/function-summaries";
+export type DiagnosticCategory = "SECURITY" | "CORRECTNESS" | "PERFORMANCE" | "REACT_HOOKS" | "REACT_NATIVE_EXPO";
+export type DiagnosticSeverity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "INFO";
+export type DiagnosticConfidence = "HIGH" | "MEDIUM" | "LOW";
+export type VerificationStatus = "PASSED" | "FAILED" | "INCOMPLETE";
+export type CheckStatus = "PASSED" | "FAILED" | "INCOMPLETE" | "SKIPPED";
+export type AnalysisRequirement = "AST" | "CFG" | "ABSTRACT_INTERPRETATION" | "TYPE_INFORMATION" | "PROJECT_CONTEXT";
+export type SupportedFramework = "TYPESCRIPT" | "REACT" | "WEB" | "REACT_NATIVE" | "EXPO";
 export interface SourceLocation {
     line: number;
     column: number;
@@ -76,7 +76,7 @@ export interface VerificationStats {
     executionTimeMs: number;
     functionsAnalyzed?: number;
     truncatedFunctions?: number;
-    failureType?: 'parse-error' | null;
+    failureType?: "parse-error" | null;
     baselineSuppressed?: number;
     issuesCount: {
         critical: number;
@@ -96,7 +96,7 @@ export interface VerificationResult {
     stats: VerificationStats;
     summary: string;
 }
-export type NullabilityValue = 'Bottom' | 'NonNull' | 'Null' | 'Undefined' | 'Nullable' | 'Top';
+export type NullabilityValue = "Bottom" | "NonNull" | "Null" | "Undefined" | "Nullable" | "Top";
 export interface IntervalValue {
     min: number;
     max: number;
@@ -151,7 +151,7 @@ export interface RuleContext {
     functionSummaries: Map<string, FunctionSummary>;
     /** Project root, when known — lets path-convention rules (e.g. Expo Router) resolve files precisely. */
     projectRoot?: string;
-    report: (diagnostic: Omit<Diagnostic, 'filePath'>) => void;
+    report: (diagnostic: Omit<Diagnostic, "filePath">) => void;
 }
 export interface VerificationRule {
     id: string;

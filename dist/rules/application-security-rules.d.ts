@@ -1,4 +1,4 @@
-import { VerificationRule } from '../types/verifier';
+import { VerificationRule } from "../types/verifier";
 export declare const SensitiveLoggingRule: VerificationRule;
 export declare const UnverifiedJwtRule: VerificationRule;
 export declare const MassAssignmentRule: VerificationRule;

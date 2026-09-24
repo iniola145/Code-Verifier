@@ -46,7 +46,7 @@ function report(ctx, node, ruleId, cweId, severity, message, explanation, remedi
         id: `${ctx.filePath}:${loc.start.line}:${loc.start.column}:${ruleId}`,
         ruleId,
         cweId,
-        category: 'SECURITY',
+        category: "SECURITY",
         severity,
         message,
         explanation,
@@ -65,7 +65,8 @@ function propertyName(node) {
 function memberParts(node) {
     const parts = [];
     let current = node;
-    while (t.isMemberExpression(current) || t.isOptionalMemberExpression(current)) {
+    while (t.isMemberExpression(current) ||
+        t.isOptionalMemberExpression(current)) {
         const name = !current.computed && t.isIdentifier(current.property)
             ? current.property.name
             : current.computed && t.isStringLiteral(current.property)
@@ -83,7 +84,7 @@ function memberParts(node) {
 function calleeName(node) {
     if (t.isIdentifier(node))
         return node.name;
-    return memberParts(node).join('.');
+    return memberParts(node).join(".");
 }
 const SENSITIVE_NAME = /^(?:password|passwd|passphrase|token|accessToken|refreshToken|idToken|authToken|sessionId|sessionToken|secret|clientSecret|apiKey|authorization|cookie|setCookie|creditCard|cardNumber|cvv|ssn)$/i;
 function containsSensitiveValue(node, depth = 0) {
@@ -101,8 +102,9 @@ function containsSensitiveValue(node, depth = 0) {
             if (!t.isObjectProperty(property))
                 return false;
             const name = propertyName(property.key);
-            return (name !== null && SENSITIVE_NAME.test(name)) ||
-                (t.isExpression(property.value) && containsSensitiveValue(property.value, depth + 1));
+            return ((name !== null && SENSITIVE_NAME.test(name)) ||
+                (t.isExpression(property.value) &&
+                    containsSensitiveValue(property.value, depth + 1)));
         });
     }
     if (t.isArrayExpression(node)) {
@@ -112,11 +114,12 @@ function containsSensitiveValue(node, depth = 0) {
         return node.expressions.some((expression) => containsSensitiveValue(expression, depth + 1));
     }
     if (t.isBinaryExpression(node) || t.isLogicalExpression(node)) {
-        return containsSensitiveValue(node.left, depth + 1) || containsSensitiveValue(node.right, depth + 1);
+        return (containsSensitiveValue(node.left, depth + 1) ||
+            containsSensitiveValue(node.right, depth + 1));
     }
     if (t.isConditionalExpression(node)) {
-        return containsSensitiveValue(node.consequent, depth + 1) ||
-            containsSensitiveValue(node.alternate, depth + 1);
+        return (containsSensitiveValue(node.consequent, depth + 1) ||
+            containsSensitiveValue(node.alternate, depth + 1));
     }
     return false;
 }
@@ -125,7 +128,8 @@ function resolvesToRequestObject(node, path, depth = 0) {
         return false;
     if (t.isMemberExpression(node) || t.isOptionalMemberExpression(node)) {
         const parts = memberParts(node);
-        return ['req', 'request'].includes(parts[0]) && ['body', 'query', 'params'].includes(parts[1]);
+        return (["req", "request"].includes(parts[0]) &&
+            ["body", "query", "params"].includes(parts[1]));
     }
     if (t.isIdentifier(node)) {
         const binding = path.scope.getBinding(node.name);
@@ -136,12 +140,16 @@ function resolvesToRequestObject(node, path, depth = 0) {
             : binding.path.parentPath?.isVariableDeclarator()
                 ? binding.path.parentPath
                 : null;
-        return !!declarator && resolvesToRequestObject(declarator.node.init, binding.path, depth + 1);
+        return (!!declarator &&
+            resolvesToRequestObject(declarator.node.init, binding.path, depth + 1));
     }
     if (t.isObjectExpression(node)) {
-        return node.properties.some((property) => t.isSpreadElement(property) && resolvesToRequestObject(property.argument, path, depth + 1));
+        return node.properties.some((property) => t.isSpreadElement(property) &&
+            resolvesToRequestObject(property.argument, path, depth + 1));
     }
-    if (t.isTSAsExpression(node) || t.isTSTypeAssertion(node) || t.isTSNonNullExpression(node) ||
+    if (t.isTSAsExpression(node) ||
+        t.isTSTypeAssertion(node) ||
+        t.isTSNonNullExpression(node) ||
         t.isParenthesizedExpression(node)) {
         return resolvesToRequestObject(node.expression, path, depth + 1);
     }
@@ -149,19 +157,21 @@ function resolvesToRequestObject(node, path, depth = 0) {
 }
 function objectValue(object, key) {
     for (const property of object.properties) {
-        if (!t.isObjectProperty(property) || property.computed || propertyName(property.key) !== key)
+        if (!t.isObjectProperty(property) ||
+            property.computed ||
+            propertyName(property.key) !== key)
             continue;
         return t.isExpression(property.value) ? property.value : null;
     }
     return null;
 }
 exports.SensitiveLoggingRule = {
-    id: 'SEC-013',
-    name: 'Sensitive Data in Logs',
-    description: 'Detects direct logging of credentials, tokens, session identifiers, and payment secrets.',
-    category: 'SECURITY',
-    defaultSeverity: 'HIGH',
-    cweId: 'CWE-532',
+    id: "SEC-013",
+    name: "Sensitive Data in Logs",
+    description: "Detects direct logging of credentials, tokens, session identifiers, and payment secrets.",
+    category: "SECURITY",
+    defaultSeverity: "HIGH",
+    cweId: "CWE-532",
     check(ctx) {
         (0, traverse_1.default)(ctx.ast, {
             CallExpression(path) {
@@ -170,127 +180,153 @@ exports.SensitiveLoggingRule = {
                     return;
                 if (!path.node.arguments.some((argument) => t.isExpression(argument) && containsSensitiveValue(argument)))
                     return;
-                report(ctx, path.node, 'SEC-013', 'CWE-532', 'HIGH', 'A sensitive value is written directly to application logs.', 'Logs are commonly retained and broadly accessible; credentials and session material in them can enable account compromise.', 'Remove the value or replace it with an explicitly redacted or one-way hashed correlation value.');
+                report(ctx, path.node, "SEC-013", "CWE-532", "HIGH", "A sensitive value is written directly to application logs.", "Logs are commonly retained and broadly accessible; credentials and session material in them can enable account compromise.", "Remove the value or replace it with an explicitly redacted or one-way hashed correlation value.");
             },
         });
     },
 };
 exports.UnverifiedJwtRule = {
-    id: 'SEC-014',
-    name: 'JWT Decoded Without Verification',
-    description: 'Detects jsonwebtoken decode calls on request or authentication token values.',
-    category: 'SECURITY',
-    defaultSeverity: 'HIGH',
-    cweId: 'CWE-347',
+    id: "SEC-014",
+    name: "JWT Decoded Without Verification",
+    description: "Detects jsonwebtoken decode calls on request or authentication token values.",
+    category: "SECURITY",
+    defaultSeverity: "HIGH",
+    cweId: "CWE-347",
     check(ctx) {
         (0, traverse_1.default)(ctx.ast, {
             CallExpression(path) {
                 const name = calleeName(path.node.callee);
-                if (name !== 'jwt.decode' && name !== 'jsonwebtoken.decode')
+                if (name !== "jwt.decode" && name !== "jsonwebtoken.decode")
                     return;
                 const argument = path.node.arguments[0];
                 if (!t.isExpression(argument))
                     return;
                 const functionParent = path.getFunctionParent();
                 const functionName = functionParent && t.isFunctionDeclaration(functionParent.node)
-                    ? functionParent.node.id?.name ?? ''
-                    : '';
-                if (!containsSensitiveValue(argument) && !/auth|login|session|verify|middleware/i.test(functionName))
+                    ? (functionParent.node.id?.name ?? "")
+                    : "";
+                if (!containsSensitiveValue(argument) &&
+                    !/auth|login|session|verify|middleware/i.test(functionName))
                     return;
-                report(ctx, path.node, 'SEC-014', 'CWE-347', 'HIGH', 'JWT claims are decoded without verifying the token signature.', 'Decoding only parses attacker-controlled claims; it does not establish signature validity, issuer, audience, or expiration.', 'Use jwt.verify with a trusted key and an explicit algorithm, issuer, and audience allowlist before trusting claims.');
+                report(ctx, path.node, "SEC-014", "CWE-347", "HIGH", "JWT claims are decoded without verifying the token signature.", "Decoding only parses attacker-controlled claims; it does not establish signature validity, issuer, audience, or expiration.", "Use jwt.verify with a trusted key and an explicit algorithm, issuer, and audience allowlist before trusting claims.");
             },
         });
     },
 };
-const PERSISTENCE_METHODS = new Set(['create', 'insert', 'insertOne', 'update', 'updateOne', 'updateMany',
-    'findOneAndUpdate', 'findByIdAndUpdate', 'upsert', 'save']);
+const PERSISTENCE_METHODS = new Set([
+    "create",
+    "insert",
+    "insertOne",
+    "update",
+    "updateOne",
+    "updateMany",
+    "findOneAndUpdate",
+    "findByIdAndUpdate",
+    "upsert",
+    "save",
+]);
 exports.MassAssignmentRule = {
-    id: 'SEC-015',
-    name: 'Request Object Mass Assignment',
-    description: 'Detects whole request objects passed into persistence and object-assignment APIs.',
-    category: 'SECURITY',
-    defaultSeverity: 'HIGH',
-    cweId: 'CWE-915',
+    id: "SEC-015",
+    name: "Request Object Mass Assignment",
+    description: "Detects whole request objects passed into persistence and object-assignment APIs.",
+    category: "SECURITY",
+    defaultSeverity: "HIGH",
+    cweId: "CWE-915",
     check(ctx) {
         (0, traverse_1.default)(ctx.ast, {
             CallExpression(path) {
                 const name = calleeName(path.node.callee);
                 let candidate = null;
-                if (name === 'Object.assign') {
+                if (name === "Object.assign") {
                     const source = path.node.arguments[1];
                     candidate = t.isExpression(source) ? source : null;
                 }
                 else {
-                    const method = name.split('.').at(-1) ?? '';
+                    const method = name.split(".").at(-1) ?? "";
                     if (!PERSISTENCE_METHODS.has(method))
                         return;
-                    const argumentIndex = ['update', 'updateOne', 'updateMany', 'findOneAndUpdate', 'findByIdAndUpdate']
-                        .includes(method) && path.node.arguments.length > 1 ? 1 : 0;
+                    const argumentIndex = [
+                        "update",
+                        "updateOne",
+                        "updateMany",
+                        "findOneAndUpdate",
+                        "findByIdAndUpdate",
+                    ].includes(method) && path.node.arguments.length > 1
+                        ? 1
+                        : 0;
                     const argument = path.node.arguments[argumentIndex];
                     candidate = t.isExpression(argument) ? argument : null;
                 }
                 if (!candidate || !resolvesToRequestObject(candidate, path))
                     return;
-                report(ctx, path.node, 'SEC-015', 'CWE-915', 'HIGH', 'A whole request object is passed directly into an object or persistence update.', 'Attackers can submit unexpected fields such as roles, ownership, approval state, prices, or internal flags.', 'Construct a DTO from an allowlist of permitted fields, validate it, and pass only that object to persistence.');
+                report(ctx, path.node, "SEC-015", "CWE-915", "HIGH", "A whole request object is passed directly into an object or persistence update.", "Attackers can submit unexpected fields such as roles, ownership, approval state, prices, or internal flags.", "Construct a DTO from an allowlist of permitted fields, validate it, and pass only that object to persistence.");
             },
         });
     },
 };
 const SESSION_COOKIE = /session|sid|auth|token|jwt|refresh/i;
 exports.InsecureSessionCookieRule = {
-    id: 'SEC-016',
-    name: 'Insecure Session Cookie',
-    description: 'Detects security-sensitive Express cookies without Secure, HttpOnly, and SameSite protection.',
-    category: 'SECURITY',
-    defaultSeverity: 'HIGH',
-    cweId: 'CWE-614',
+    id: "SEC-016",
+    name: "Insecure Session Cookie",
+    description: "Detects security-sensitive Express cookies without Secure, HttpOnly, and SameSite protection.",
+    category: "SECURITY",
+    defaultSeverity: "HIGH",
+    cweId: "CWE-614",
     check(ctx) {
         (0, traverse_1.default)(ctx.ast, {
             CallExpression(path) {
                 const name = calleeName(path.node.callee);
-                if (!name.endsWith('.cookie'))
+                if (!name.endsWith(".cookie"))
                     return;
                 const cookieName = path.node.arguments[0];
-                if (!t.isStringLiteral(cookieName) || !SESSION_COOKIE.test(cookieName.value))
+                if (!t.isStringLiteral(cookieName) ||
+                    !SESSION_COOKIE.test(cookieName.value))
                     return;
                 const options = path.node.arguments[2];
-                const secure = t.isObjectExpression(options) ? objectValue(options, 'secure') : null;
-                const httpOnly = t.isObjectExpression(options) ? objectValue(options, 'httpOnly') : null;
-                const sameSite = t.isObjectExpression(options) ? objectValue(options, 'sameSite') : null;
+                const secure = t.isObjectExpression(options)
+                    ? objectValue(options, "secure")
+                    : null;
+                const httpOnly = t.isObjectExpression(options)
+                    ? objectValue(options, "httpOnly")
+                    : null;
+                const sameSite = t.isObjectExpression(options)
+                    ? objectValue(options, "sameSite")
+                    : null;
                 const protectedCookie = t.isBooleanLiteral(secure, { value: true }) &&
                     t.isBooleanLiteral(httpOnly, { value: true }) &&
-                    ((t.isStringLiteral(sameSite) && /^(strict|lax)$/i.test(sameSite.value)) ||
+                    ((t.isStringLiteral(sameSite) &&
+                        /^(strict|lax)$/i.test(sameSite.value)) ||
                         t.isBooleanLiteral(sameSite, { value: true }));
                 if (protectedCookie)
                     return;
-                report(ctx, path.node, 'SEC-016', 'CWE-614', 'HIGH', `Security-sensitive cookie '${cookieName.value}' lacks explicit Secure, HttpOnly, or restrictive SameSite protection.`, 'Missing cookie attributes can expose session material over cleartext transport, client-side script access, or cross-site requests.', 'Set secure: true, httpOnly: true, and sameSite: "strict" or "lax" for the session cookie.');
+                report(ctx, path.node, "SEC-016", "CWE-614", "HIGH", `Security-sensitive cookie '${cookieName.value}' lacks explicit Secure, HttpOnly, or restrictive SameSite protection.`, "Missing cookie attributes can expose session material over cleartext transport, client-side script access, or cross-site requests.", 'Set secure: true, httpOnly: true, and sameSite: "strict" or "lax" for the session cookie.');
             },
         });
     },
 };
 exports.PermissiveCorsRule = {
-    id: 'SEC-017',
-    name: 'Credentialed Permissive CORS',
-    description: 'Detects CORS configuration that combines credentials with wildcard or reflected origins.',
-    category: 'SECURITY',
-    defaultSeverity: 'HIGH',
-    cweId: 'CWE-942',
+    id: "SEC-017",
+    name: "Credentialed Permissive CORS",
+    description: "Detects CORS configuration that combines credentials with wildcard or reflected origins.",
+    category: "SECURITY",
+    defaultSeverity: "HIGH",
+    cweId: "CWE-942",
     check(ctx) {
         (0, traverse_1.default)(ctx.ast, {
             CallExpression(path) {
-                if (calleeName(path.node.callee).split('.').at(-1) !== 'cors')
+                if (calleeName(path.node.callee).split(".").at(-1) !== "cors")
                     return;
                 const options = path.node.arguments[0];
                 if (!t.isObjectExpression(options))
                     return;
-                const credentials = objectValue(options, 'credentials');
-                const origin = objectValue(options, 'origin');
+                const credentials = objectValue(options, "credentials");
+                const origin = objectValue(options, "origin");
                 const permissive = t.isBooleanLiteral(origin, { value: true }) ||
-                    t.isStringLiteral(origin, { value: '*' }) ||
-                    (t.isRegExpLiteral(origin) && origin.pattern === '.*');
+                    t.isStringLiteral(origin, { value: "*" }) ||
+                    (t.isRegExpLiteral(origin) && origin.pattern === ".*");
                 if (!t.isBooleanLiteral(credentials, { value: true }) || !permissive)
                     return;
-                report(ctx, path.node, 'SEC-017', 'CWE-942', 'HIGH', 'CORS allows credentials with a wildcard or reflected request origin.', 'A permissive credentialed origin policy can let an attacker-controlled site issue authenticated cross-origin requests and read responses.', 'Use an exact allowlist of trusted HTTPS origins and reject all unmatched origins.');
+                report(ctx, path.node, "SEC-017", "CWE-942", "HIGH", "CORS allows credentials with a wildcard or reflected request origin.", "A permissive credentialed origin policy can let an attacker-controlled site issue authenticated cross-origin requests and read responses.", "Use an exact allowlist of trusted HTTPS origins and reject all unmatched origins.");
             },
         });
     },

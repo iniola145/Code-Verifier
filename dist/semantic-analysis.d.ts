@@ -1,4 +1,4 @@
-import { Diagnostic } from './types/verifier';
+import { Diagnostic } from "./types/verifier";
 /** Project-wide TypeScript checker used for rules that cannot be soundly inferred from syntax alone. */
 export declare class SemanticAnalysisIndex {
     private readonly program;

@@ -38,10 +38,31 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const baseline_1 = require("./baseline");
 const SKIP_DIRS = new Set([
-    'node_modules', 'dist', 'build', '.git', '.expo', '.gradle', 'coverage', 'Pods', 'DerivedData',
+    "node_modules",
+    "dist",
+    "build",
+    ".git",
+    ".expo",
+    ".gradle",
+    "coverage",
+    "Pods",
+    "DerivedData",
 ]);
-const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
-const RANK = { CRITICAL: 5, HIGH: 4, MEDIUM: 3, LOW: 2, INFO: 1 };
+const SOURCE_EXTENSIONS = new Set([
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+]);
+const RANK = {
+    CRITICAL: 5,
+    HIGH: 4,
+    MEDIUM: 3,
+    LOW: 2,
+    INFO: 1,
+};
 /**
  * Cross-checks JS imports against the checked-out native app: a package that
  * ships an iOS podspec (Expo SDK packages, community RN libraries) but whose
@@ -59,7 +80,7 @@ function discoverLockfiles(targets) {
             return;
         const stat = fs.statSync(entry);
         if (stat.isFile()) {
-            if (path.basename(entry) === 'Podfile.lock')
+            if (path.basename(entry) === "Podfile.lock")
                 found.add(path.resolve(entry));
             return;
         }
@@ -71,7 +92,7 @@ function discoverLockfiles(targets) {
             const childPath = path.join(entry, child.name);
             if (child.isDirectory())
                 walk(childPath);
-            else if (child.name === 'Podfile.lock')
+            else if (child.name === "Podfile.lock")
                 found.add(path.resolve(childPath));
         }
     };
@@ -87,11 +108,16 @@ function podNamesFromLockfile(code) {
 }
 /** Package name for a module specifier: subpaths/queries stripped, scoped packages keep two segments. */
 function basePackageName(specifier) {
-    const cleaned = specifier.split('?')[0];
-    if (!cleaned || cleaned.startsWith('.') || cleaned.startsWith('/') || /^[a-z]+:/i.test(cleaned))
+    const cleaned = specifier.split("?")[0];
+    if (!cleaned ||
+        cleaned.startsWith(".") ||
+        cleaned.startsWith("/") ||
+        /^[a-z]+:/i.test(cleaned))
         return null;
-    const segments = cleaned.split('/');
-    return segments[0].startsWith('@') ? segments.slice(0, 2).join('/') : segments[0];
+    const segments = cleaned.split("/");
+    return segments[0].startsWith("@")
+        ? segments.slice(0, 2).join("/")
+        : segments[0];
 }
 const IMPORT_PATTERNS = [
     /\bimport\s+[^;'"]*?\bfrom\s*['"]([^'"]+)['"]/g,
@@ -119,15 +145,16 @@ function collectImportedPackages(appBase, projectRoot) {
         for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
             if (entry.isDirectory() && SKIP_DIRS.has(entry.name))
                 continue;
-            if (entry.name.startsWith('.'))
+            if (entry.name.startsWith("."))
                 continue;
             const child = path.join(dir, entry.name);
             if (entry.isDirectory()) {
                 walk(child);
             }
-            else if (SOURCE_EXTENSIONS.has(path.extname(entry.name)) && !entry.name.endsWith('.d.ts')) {
+            else if (SOURCE_EXTENSIONS.has(path.extname(entry.name)) &&
+                !entry.name.endsWith(".d.ts")) {
                 try {
-                    const code = fs.readFileSync(child, 'utf8');
+                    const code = fs.readFileSync(child, "utf8");
                     const rel = path.relative(projectRoot, child) || child;
                     for (const pattern of IMPORT_PATTERNS) {
                         for (const match of code.matchAll(pattern))
@@ -150,9 +177,9 @@ function collectImportedPackages(appBase, projectRoot) {
  * the package contributes no iOS-native code — nothing to check.
  */
 function podNamesForPackage(appBase, pkg) {
-    const pkgDir = path.join(appBase, 'node_modules', pkg);
+    const pkgDir = path.join(appBase, "node_modules", pkg);
     const names = new Set();
-    for (const dir of [pkgDir, path.join(pkgDir, 'ios')]) {
+    for (const dir of [pkgDir, path.join(pkgDir, "ios")]) {
         let entries;
         try {
             entries = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
@@ -161,13 +188,13 @@ function podNamesForPackage(appBase, pkg) {
             continue;
         }
         for (const entry of entries) {
-            if (!entry.endsWith('.podspec') && !entry.endsWith('.podspec.json'))
+            if (!entry.endsWith(".podspec") && !entry.endsWith(".podspec.json"))
                 continue;
             try {
-                const text = fs.readFileSync(path.join(dir, entry), 'utf8');
-                if (entry.endsWith('.podspec.json')) {
+                const text = fs.readFileSync(path.join(dir, entry), "utf8");
+                if (entry.endsWith(".podspec.json")) {
                     const parsed = JSON.parse(text);
-                    if (typeof parsed?.name === 'string')
+                    if (typeof parsed?.name === "string")
                         names.add(parsed.name);
                 }
                 else {
@@ -185,7 +212,7 @@ function podNamesForPackage(appBase, pkg) {
 }
 function verifyLockfile(lockfilePath, options) {
     const startTime = Date.now();
-    const code = fs.readFileSync(lockfilePath, 'utf8');
+    const code = fs.readFileSync(lockfilePath, "utf8");
     const lines = code.split(/\r?\n/);
     const diagnostics = [];
     try {
@@ -198,19 +225,22 @@ function verifyLockfile(lockfilePath, options) {
                 const podNames = podNamesForPackage(appBase, pkg);
                 if (podNames.length === 0 || podNames.some((name) => pods.has(name)))
                     continue;
-                const podList = podNames.map((name) => `'${name}'`).join(', ');
+                const podList = podNames.map((name) => `'${name}'`).join(", ");
                 diagnostics.push({
                     id: `${lockfilePath}:1:0:NAT-001`,
                     filePath: lockfilePath,
-                    ruleId: 'NAT-001',
-                    category: 'REACT_NATIVE_EXPO',
-                    severity: 'HIGH',
+                    ruleId: "NAT-001",
+                    category: "REACT_NATIVE_EXPO",
+                    severity: "HIGH",
                     message: `Package '${pkg}' declares native iOS pod(s) ${podList} that are missing from ios/Podfile.lock — the checked-out native app is stale.`,
-                    explanation: `Autolinking installs native modules at native build time. '${pkg}' is imported in ${files.length === 1 ? 'a source file' : `${files.length} source files`} (${files.join(', ')}), but its pod is not in the lockfile, so the installed app binary predates the dependency. The JS import resolves while the native side throws "Cannot find native module ..." at runtime.`,
-                    loc: { start: { line: 1, column: 0 }, end: { line: 1, column: lines[0]?.length ?? 0 } },
-                    codeSnippet: lines[0] ?? '',
+                    explanation: `Autolinking installs native modules at native build time. '${pkg}' is imported in ${files.length === 1 ? "a source file" : `${files.length} source files`} (${files.join(", ")}), but its pod is not in the lockfile, so the installed app binary predates the dependency. The JS import resolves while the native side throws "Cannot find native module ..." at runtime.`,
+                    loc: {
+                        start: { line: 1, column: 0 },
+                        end: { line: 1, column: lines[0]?.length ?? 0 },
+                    },
+                    codeSnippet: lines[0] ?? "",
                     remediation: {
-                        summary: 'Run pod install and rebuild the native app before running the JS bundle (e.g. `npx expo run:ios`, or `npx expo prebuild --clean` then rebuild; on Android, `npx expo run:android`).',
+                        summary: "Run pod install and rebuild the native app before running the JS bundle (e.g. `npx expo run:ios`, or `npx expo prebuild --clean` then rebuild; on Android, `npx expo run:android`).",
                         llmPromptHint: `The dependency '${pkg}' was added but the native iOS app was never rebuilt: its pod (${podList}) is absent from ios/Podfile.lock. Run pod install and a full native rebuild, then verify the module's native side exists before using it.`,
                     },
                 });
@@ -227,17 +257,32 @@ function verifyLockfile(lockfilePath, options) {
         ? { ...item, severity: options.severityOverrides[item.ruleId] }
         : item)
         .map((item) => ({
-        ...item, fingerprint: (0, baseline_1.diagnosticFingerprint)(item, lines, options.projectRoot), confidence: 'HIGH',
+        ...item,
+        fingerprint: (0, baseline_1.diagnosticFingerprint)(item, lines, options.projectRoot),
+        confidence: "HIGH",
     }));
     const active = fingerprinted.filter((item) => !options.baselineFingerprints?.has(item.fingerprint));
-    const failOn = options.failOn ?? 'MEDIUM';
+    const failOn = options.failOn ?? "MEDIUM";
     const blocking = active.filter((item) => RANK[item.severity] >= RANK[failOn]).length;
-    const status = blocking > 0 ? 'FAILED' : 'PASSED';
+    const status = blocking > 0 ? "FAILED" : "PASSED";
     return {
-        filePath: lockfilePath, status, passed: status === 'PASSED', diagnostics: active,
-        checks: [{ id: 'native-consistency', name: 'Native module consistency', status: 'PASSED', required: true }],
+        filePath: lockfilePath,
+        status,
+        passed: status === "PASSED",
+        diagnostics: active,
+        checks: [
+            {
+                id: "native-consistency",
+                name: "Native module consistency",
+                status: "PASSED",
+                required: true,
+            },
+        ],
         stats: {
-            totalLines: lines.length, blocksAnalyzed: 0, rulesChecked: 1, executionTimeMs: Date.now() - startTime,
+            totalLines: lines.length,
+            blocksAnalyzed: 0,
+            rulesChecked: 1,
+            executionTimeMs: Date.now() - startTime,
             baselineSuppressed: fingerprinted.length - active.length,
             issuesCount: countSeverities(active),
         },
@@ -248,19 +293,36 @@ function verifyLockfile(lockfilePath, options) {
 }
 function countSeverities(items) {
     return {
-        critical: items.filter((item) => item.severity === 'CRITICAL').length,
-        high: items.filter((item) => item.severity === 'HIGH').length,
-        medium: items.filter((item) => item.severity === 'MEDIUM').length,
-        low: items.filter((item) => item.severity === 'LOW').length,
-        info: items.filter((item) => item.severity === 'INFO').length,
+        critical: items.filter((item) => item.severity === "CRITICAL").length,
+        high: items.filter((item) => item.severity === "HIGH").length,
+        medium: items.filter((item) => item.severity === "MEDIUM").length,
+        low: items.filter((item) => item.severity === "LOW").length,
+        info: items.filter((item) => item.severity === "INFO").length,
     };
 }
 function failureResult(filePath, totalLines, duration, message) {
     return {
-        filePath, status: 'INCOMPLETE', passed: false, diagnostics: [],
-        checks: [{ id: 'native-consistency', name: 'Native module consistency', status: 'INCOMPLETE', required: true, message }],
-        stats: { totalLines, blocksAnalyzed: 0, rulesChecked: 1, executionTimeMs: duration,
-            issuesCount: { critical: 0, high: 0, medium: 0, low: 0, info: 0 }, failureType: 'parse-error' },
+        filePath,
+        status: "INCOMPLETE",
+        passed: false,
+        diagnostics: [],
+        checks: [
+            {
+                id: "native-consistency",
+                name: "Native module consistency",
+                status: "INCOMPLETE",
+                required: true,
+                message,
+            },
+        ],
+        stats: {
+            totalLines,
+            blocksAnalyzed: 0,
+            rulesChecked: 1,
+            executionTimeMs: duration,
+            issuesCount: { critical: 0, high: 0, medium: 0, low: 0, info: 0 },
+            failureType: "parse-error",
+        },
         summary: `Verification Incomplete: native module consistency could not be checked (${message}).`,
     };
 }

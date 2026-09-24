@@ -705,6 +705,161 @@ async function runTests() {
     "Handler referenced from JSX is used",
   );
   await expectFinding(
+    `import * as ReactDOM from "react-dom"; export function boot(el: any) { ReactDOM.render(<div />, el); }`,
+    "REACT-009",
+    "Detects ReactDOM.render through a namespace import",
+  );
+  await expectFinding(
+    `import { render } from "react-dom"; export function boot(el: any) { render(<div />, el); }`,
+    "REACT-009",
+    "Detects a named render import from react-dom",
+  );
+  await expectFinding(
+    `import * as ReactDOMServer from "react-dom/server"; export function stream(app: any) { return ReactDOMServer.renderToNodeStream(app); }`,
+    "REACT-009",
+    "Detects removed react-dom/server node-stream renderer",
+  );
+  await expectNoFinding(
+    `import { createRoot } from "react-dom/client"; export function boot(el: any) { createRoot(el).render(<div />); }`,
+    "REACT-009",
+    "react-dom/client createRoot is clean",
+  );
+  await expectFinding(
+    `import * as React from "react"; export function makeButton() { return React.createFactory("button"); }`,
+    "REACT-010",
+    "Detects React.createFactory call",
+  );
+  await expectFinding(
+    `export function Form() { return <input ref="emailInput" />; }`,
+    "REACT-011",
+    "Detects string ref on a JSX element",
+  );
+  await expectNoFinding(
+    `export function Form() { const emailRef = useRef(null); return <input ref={emailRef} />; }`,
+    "REACT-011",
+    "Ref object is clean",
+  );
+  await expectFinding(
+    `class Nav extends React.Component { static contextTypes = { theme: () => {} }; getChildContext() { return { theme: "dark" }; } render() { return null; } }`,
+    "REACT-012",
+    "Detects legacy context members on a class component",
+  );
+  await expectNoFinding(
+    `class Nav extends React.Component { static contextType = ThemeContext; render() { return null; } }`,
+    "REACT-012",
+    "Modern static contextType is clean",
+  );
+  await expectFinding(
+    `const SizeButton = (props: any) => null; SizeButton.defaultProps = { size: 1 }; export { SizeButton };`,
+    "REACT-013",
+    "Detects defaultProps on a function component",
+  );
+  await expectNoFinding(
+    `class Card extends React.Component { render() { return null; } } Card.defaultProps = { size: 1 };`,
+    "REACT-013",
+    "defaultProps on a class component is still supported and stays quiet",
+  );
+  await expectNoFinding(
+    `function SizeButton({ size = 1 }: any) { return null; }`,
+    "REACT-013",
+    "Default parameters are the clean replacement",
+  );
+  await expectFinding(
+    `const Badge = () => null; Badge.propTypes = { count: count }; export { Badge };`,
+    "REACT-014",
+    "Detects propTypes assigned on a component",
+  );
+  await expectFinding(
+    `function Screen() { const marker = useRef(); return null; }`,
+    "REACT-015",
+    "Detects useRef() called without an initial value",
+  );
+  await expectNoFinding(
+    `function Screen() { const marker = useRef(null); return null; }`,
+    "REACT-015",
+    "useRef(null) is clean",
+  );
+  await expectFinding(
+    `import { use } from "react"; export function C({ promise }: any) { try { return use(promise); } catch { return null; } }`,
+    "REACT-016",
+    "Detects use() inside a try clause",
+  );
+  await expectNoFinding(
+    `import { use } from "react"; export function C({ promise }: any) { const data = use(promise); return null; }`,
+    "REACT-016",
+    "use() outside try/catch is clean",
+  );
+  await expectFinding(
+    `let instance: any; export function Screen() { return <input ref={(el: any) => (instance = el)} />; }`,
+    "REACT-017",
+    "Detects implicit-return callback ref",
+  );
+  await expectNoFinding(
+    `let instance: any; export function Screen() { return <input ref={(el: any) => { instance = el; }} />; }`,
+    "REACT-017",
+    "Block-body callback ref is clean",
+  );
+  await expectNoFinding(
+    `export function Screen() { return <input ref={(el: any) => el.focus()} />; }`,
+    "REACT-017",
+    "Void-returning call in a callback ref is clean",
+  );
+  await expectFinding(
+    `import { isElement } from "react-dom/test-utils";`,
+    "REACT-018",
+    "Detects removed react-dom/test-utils import",
+  );
+  await expectFinding(
+    `import { forwardRef } from "react"; export const FancyButton = forwardRef((props: any, ref: any) => <button ref={ref} {...props} />);`,
+    "REACT-019",
+    "Advisory: forwardRef wrapper no longer needed in React 19",
+  );
+  await expectFinding(
+    `const PlaceholderScreen = ({ title }: { title: string }) => <div>{title}</div>; export const appRoutes: { path: string } = { path: "/", element: <PlaceholderScreen title="Hi" /> };`,
+    "REACT-020",
+    "Detects a component defined alongside a non-component export (route table)",
+  );
+  await expectFinding(
+    `const routes = {}; export const Page = () => <div />; export { routes };`,
+    "REACT-020",
+    "Detects a re-exported non-component specifier beside a component",
+  );
+  await expectFinding(
+    `export const Page = () => <div />; export default { config: true };`,
+    "REACT-020",
+    "Detects a non-component default export beside a component",
+  );
+  await expectNoFinding(
+    `export const Header = () => <div>hi</div>;`,
+    "REACT-020",
+    "A file exporting only components is clean",
+  );
+  await expectNoFinding(
+    `export const VERSION = "1.2.0"; export const Badge = () => <span>{VERSION}</span>;`,
+    "REACT-020",
+    "Primitive constant exports are allowed beside components (allowConstantExport)",
+  );
+  await expectNoFinding(
+    `export const appRoutes = { path: "/", children: [] };`,
+    "REACT-020",
+    "A data module with no component definitions is clean",
+  );
+  await expectNoFinding(
+    `export const usePageTitle = (t: string) => {}; export const Page = () => <div />;`,
+    "REACT-020",
+    "Hook exports are allowed beside components",
+  );
+  await expectNoFinding(
+    `export type RouteKind = "app" | "auth"; export const Page = () => <div />;`,
+    "REACT-020",
+    "Type exports are allowed beside components",
+  );
+  await expectNoFinding(
+    `const router = { routes: [<div />] }; export const AppRouter = () => <div>{router.routes}</div>;`,
+    "REACT-020",
+    "Module-level non-exported values beside a single component export are clean",
+  );
+  await expectFinding(
     `function Feed({ items }) { return <FlatList data={items} keyExtractor={(item, index) => String(index)} renderItem={renderItem} />; }`,
     "RN-COR-001",
     "Detects FlatList index key extractor",

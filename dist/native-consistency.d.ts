@@ -1,4 +1,4 @@
-import { DiagnosticSeverity, VerificationResult } from './types/verifier';
+import { DiagnosticSeverity, VerificationResult } from "./types/verifier";
 interface NativeConsistencyOptions {
     projectRoot: string;
     baselineFingerprints?: ReadonlySet<string>;

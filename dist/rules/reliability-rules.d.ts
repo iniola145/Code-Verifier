@@ -1,4 +1,4 @@
-import { VerificationRule } from '../types/verifier';
+import { VerificationRule } from "../types/verifier";
 export declare const EmptyCatchRule: VerificationRule;
 export declare const FinallyControlFlowRule: VerificationRule;
 export declare const UnreachableStatementRule: VerificationRule;

@@ -1,4 +1,4 @@
-import { CheckStatus, ProjectVerificationResult } from './types/verifier';
+import { CheckStatus, ProjectVerificationResult } from "./types/verifier";
 export interface ProjectCheckOptions {
     timeoutMs?: number;
     maxOutputBytes?: number;

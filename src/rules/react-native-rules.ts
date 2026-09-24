@@ -15,6 +15,7 @@ import { CWE_SECURITY_RULES } from "./cwe-security-rules";
 import { APPLICATION_SECURITY_RULES } from "./application-security-rules";
 import { CORRECTNESS_RULES } from "./correctness-rules";
 import { REACT_CORRECTNESS_RULES } from "./react-correctness-rules";
+import { REACT19_RULES } from "./react19-rules";
 import { RELIABILITY_RULES } from "./reliability-rules";
 import { SEMANTIC_RULES } from "./semantic-rules";
 import { MOBILE_CONFIG_RULES } from "./mobile-config-rules";
@@ -1322,6 +1323,7 @@ export const ALL_RULES: VerificationRule[] = [
   ...APPLICATION_SECURITY_RULES,
   ...CORRECTNESS_RULES,
   ...REACT_CORRECTNESS_RULES,
+  ...REACT19_RULES,
   ...RELIABILITY_RULES,
   ...SEMANTIC_RULES,
   ...MOBILE_CONFIG_RULES,

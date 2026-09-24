@@ -1,4 +1,4 @@
-import { VerificationRule } from '../types/verifier';
+import { VerificationRule } from "../types/verifier";
 export declare const CommandInjectionRule: VerificationRule;
 export declare const SqlInjectionRule: VerificationRule;
 export declare const SsrfRule: VerificationRule;

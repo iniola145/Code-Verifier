@@ -1,4 +1,4 @@
-import { VerificationRule } from '../types/verifier';
+import { VerificationRule } from "../types/verifier";
 export declare const AssignmentInConditionRule: VerificationRule;
 export declare const MissingArrayCallbackReturnRule: VerificationRule;
 export declare const AsyncForEachRule: VerificationRule;

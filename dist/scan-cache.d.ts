@@ -1,4 +1,4 @@
-import { VerificationResult } from './types/verifier';
+import { VerificationResult } from "./types/verifier";
 export declare class ScanCache {
     private readonly filePath;
     private readonly entries;

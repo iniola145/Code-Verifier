@@ -48,6 +48,7 @@ const cwe_security_rules_1 = require("./cwe-security-rules");
 const application_security_rules_1 = require("./application-security-rules");
 const correctness_rules_1 = require("./correctness-rules");
 const react_correctness_rules_1 = require("./react-correctness-rules");
+const react19_rules_1 = require("./react19-rules");
 const reliability_rules_1 = require("./reliability-rules");
 const semantic_rules_1 = require("./semantic-rules");
 const mobile_config_rules_1 = require("./mobile-config-rules");
@@ -59,45 +60,55 @@ const native_consistency_rules_1 = require("./native-consistency-rules");
 // 1. Insecure AsyncStorage for Sensitive Data (CWE-312)
 // =========================================================================
 exports.InsecureAsyncStorageRule = {
-    id: 'RN-SEC-001',
-    name: 'Insecure AsyncStorage Usage for Sensitive Data',
-    description: 'AsyncStorage is unencrypted on iOS/Android. Sensitive tokens or credentials should use Expo SecureStore.',
-    category: 'REACT_NATIVE_EXPO',
-    defaultSeverity: 'HIGH',
-    cweId: 'CWE-312',
+    id: "RN-SEC-001",
+    name: "Insecure AsyncStorage Usage for Sensitive Data",
+    description: "AsyncStorage is unencrypted on iOS/Android. Sensitive tokens or credentials should use Expo SecureStore.",
+    category: "REACT_NATIVE_EXPO",
+    defaultSeverity: "HIGH",
+    cweId: "CWE-312",
     check: (ctx) => {
         (0, traverse_1.default)(ctx.ast, {
             CallExpression(path) {
                 const callee = path.node.callee;
                 if (t.isMemberExpression(callee) &&
-                    t.isIdentifier(callee.object, { name: 'AsyncStorage' }) &&
-                    t.isIdentifier(callee.property, { name: 'setItem' })) {
+                    t.isIdentifier(callee.object, { name: "AsyncStorage" }) &&
+                    t.isIdentifier(callee.property, { name: "setItem" })) {
                     const [keyArg] = path.node.arguments;
                     const keyStr = t.isStringLiteral(keyArg)
                         ? keyArg.value
                         : t.isTemplateLiteral(keyArg)
-                            ? keyArg.quasis[0]?.value.cooked ?? ''
+                            ? (keyArg.quasis[0]?.value.cooked ?? "")
                             : null;
                     if (keyStr !== null) {
                         const key = keyStr.toLowerCase();
-                        const sensitiveKeywords = ['token', 'auth', 'jwt', 'secret', 'password', 'session', 'credential', 'apikey', 'api_key'];
+                        const sensitiveKeywords = [
+                            "token",
+                            "auth",
+                            "jwt",
+                            "secret",
+                            "password",
+                            "session",
+                            "credential",
+                            "apikey",
+                            "api_key",
+                        ];
                         const isSensitive = sensitiveKeywords.some((kw) => key.includes(kw));
                         if (isSensitive) {
                             const loc = (0, ast_1.nodeToLocation)(path.node);
                             ctx.report({
                                 id: `${ctx.filePath}:${loc.start.line}:${loc.start.column}:RN-SEC-001`,
-                                ruleId: 'RN-SEC-001',
-                                cweId: 'CWE-312',
-                                category: 'REACT_NATIVE_EXPO',
-                                severity: 'HIGH',
+                                ruleId: "RN-SEC-001",
+                                cweId: "CWE-312",
+                                category: "REACT_NATIVE_EXPO",
+                                severity: "HIGH",
                                 message: `Sensitive key "${keyStr}" stored in unencrypted AsyncStorage.`,
-                                explanation: 'AsyncStorage is stored in plain text (SQLite/SharedPreferences) and is vulnerable to extraction on rooted/jailbroken devices or backup exports.',
+                                explanation: "AsyncStorage is stored in plain text (SQLite/SharedPreferences) and is vulnerable to extraction on rooted/jailbroken devices or backup exports.",
                                 loc,
                                 codeSnippet: (0, ast_1.extractCodeSnippet)(ctx.lines, loc),
                                 remediation: {
-                                    summary: 'Use Expo SecureStore instead of AsyncStorage for sensitive credentials.',
-                                    suggestedFix: 'await SecureStore.setItemAsync(key, value);',
-                                    llmPromptHint: 'Replace AsyncStorage.setItem with SecureStore.setItemAsync from expo-secure-store.',
+                                    summary: "Use Expo SecureStore instead of AsyncStorage for sensitive credentials.",
+                                    suggestedFix: "await SecureStore.setItemAsync(key, value);",
+                                    llmPromptHint: "Replace AsyncStorage.setItem with SecureStore.setItemAsync from expo-secure-store.",
                                 },
                             });
                         }
@@ -111,39 +122,39 @@ exports.InsecureAsyncStorageRule = {
 // 2. WebView Unsanitized HTML / Script Injection (CWE-79 / XSS)
 // =========================================================================
 exports.WebViewInjectionRule = {
-    id: 'RN-SEC-002',
-    name: 'WebView Dynamic Content Injection',
-    description: 'Passing dynamic un-sanitized HTML or scripts to react-native-webview can cause XSS or bridge compromise.',
-    category: 'SECURITY',
-    defaultSeverity: 'CRITICAL',
-    cweId: 'CWE-79',
+    id: "RN-SEC-002",
+    name: "WebView Dynamic Content Injection",
+    description: "Passing dynamic un-sanitized HTML or scripts to react-native-webview can cause XSS or bridge compromise.",
+    category: "SECURITY",
+    defaultSeverity: "CRITICAL",
+    cweId: "CWE-79",
     check: (ctx) => {
         (0, traverse_1.default)(ctx.ast, {
             JSXElement(path) {
                 const opening = path.node.openingElement;
-                if (!t.isJSXIdentifier(opening.name, { name: 'WebView' }))
+                if (!t.isJSXIdentifier(opening.name, { name: "WebView" }))
                     return;
                 for (const attr of opening.attributes) {
                     if (!t.isJSXAttribute(attr) || !t.isJSXIdentifier(attr.name))
                         continue;
                     const attrName = attr.name.name;
                     // source={{ html: <dynamic> }} — dynamic HTML injection
-                    if (attrName === 'source' &&
+                    if (attrName === "source" &&
                         t.isJSXExpressionContainer(attr.value) &&
                         t.isObjectExpression(attr.value.expression)) {
                         for (const prop of attr.value.expression.properties) {
                             if (t.isObjectProperty(prop) &&
-                                t.isIdentifier(prop.key, { name: 'html' }) &&
+                                t.isIdentifier(prop.key, { name: "html" }) &&
                                 !t.isStringLiteral(prop.value)) {
-                                reportWebViewInjection(ctx, (0, ast_1.nodeToLocation)(prop), 'html');
+                                reportWebViewInjection(ctx, (0, ast_1.nodeToLocation)(prop), "html");
                             }
                         }
                     }
                     // injectedJavaScript={ <dynamic> } — script injection vector
-                    if (attrName === 'injectedJavaScript' &&
+                    if (attrName === "injectedJavaScript" &&
                         t.isJSXExpressionContainer(attr.value) &&
                         !t.isStringLiteral(attr.value.expression)) {
-                        reportWebViewInjection(ctx, (0, ast_1.nodeToLocation)(attr), 'injectedJavaScript');
+                        reportWebViewInjection(ctx, (0, ast_1.nodeToLocation)(attr), "injectedJavaScript");
                     }
                 }
             },
@@ -153,16 +164,16 @@ exports.WebViewInjectionRule = {
 function reportWebViewInjection(ctx, loc, prop) {
     ctx.report({
         id: `${ctx.filePath}:${loc.start.line}:${loc.start.column}:RN-SEC-002`,
-        ruleId: 'RN-SEC-002',
-        cweId: 'CWE-79',
-        category: 'SECURITY',
-        severity: 'CRITICAL',
+        ruleId: "RN-SEC-002",
+        cweId: "CWE-79",
+        category: "SECURITY",
+        severity: "CRITICAL",
         message: `Dynamic un-sanitized content passed to WebView ${prop}.`,
-        explanation: 'Injecting dynamic HTML or scripts into a WebView lets malicious code execute within the app origin or reach exposed postMessage native bridge handlers.',
+        explanation: "Injecting dynamic HTML or scripts into a WebView lets malicious code execute within the app origin or reach exposed postMessage native bridge handlers.",
         loc,
         codeSnippet: (0, ast_1.extractCodeSnippet)(ctx.lines, loc),
         remediation: {
-            summary: 'Sanitize input with DOMPurify, or render with native React Native components instead of inline HTML.',
+            summary: "Sanitize input with DOMPurify, or render with native React Native components instead of inline HTML.",
             llmPromptHint: `Ensure WebView ${prop} content is strictly sanitized or rendered using native React Native components.`,
         },
     });
@@ -171,17 +182,17 @@ function reportWebViewInjection(ctx, loc, prop) {
 // 3. React Infinite Re-render Loop Detection (CWE-835)
 // =========================================================================
 exports.InfiniteRenderLoopRule = {
-    id: 'REACT-001',
-    name: 'Unconditional State Update in Render or Effect',
-    description: 'Calling setState unconditionally inside the render body or inside useEffect without dependencies causes infinite re-render loops.',
-    category: 'REACT_HOOKS',
-    defaultSeverity: 'CRITICAL',
-    cweId: 'CWE-835',
+    id: "REACT-001",
+    name: "Unconditional State Update in Render or Effect",
+    description: "Calling setState unconditionally inside the render body or inside useEffect without dependencies causes infinite re-render loops.",
+    category: "REACT_HOOKS",
+    defaultSeverity: "CRITICAL",
+    cweId: "CWE-835",
     check: (ctx) => {
         (0, traverse_1.default)(ctx.ast, {
             CallExpression(path) {
                 const callee = path.node.callee;
-                if (!t.isIdentifier(callee, { name: 'useEffect' }))
+                if (!t.isIdentifier(callee, { name: "useEffect" }))
                     return;
                 const [_cb, deps] = path.node.arguments;
                 if (deps)
@@ -192,24 +203,28 @@ exports.InfiniteRenderLoopRule = {
                             return;
                         const name = innerPath.node.callee.name;
                         // `setX` shape only — but timer globals also match, so exclude them
-                        const TIMER_GLOBALS = new Set(['setTimeout', 'setInterval', 'setImmediate']);
+                        const TIMER_GLOBALS = new Set([
+                            "setTimeout",
+                            "setInterval",
+                            "setImmediate",
+                        ]);
                         if (TIMER_GLOBALS.has(name) || !/^set[A-Z]/.test(name))
                             return;
                         const loc = (0, ast_1.nodeToLocation)(innerPath.node);
                         ctx.report({
                             id: `${ctx.filePath}:${loc.start.line}:${loc.start.column}:REACT-001`,
-                            ruleId: 'REACT-001',
-                            cweId: 'CWE-835',
-                            category: 'REACT_HOOKS',
-                            severity: 'CRITICAL',
+                            ruleId: "REACT-001",
+                            cweId: "CWE-835",
+                            category: "REACT_HOOKS",
+                            severity: "CRITICAL",
                             message: `State setter '${name}' called inside useEffect without a dependency array.`,
-                            explanation: 'This triggers an unconditional state update after every render, causing an infinite re-render loop that freezes the UI.',
+                            explanation: "This triggers an unconditional state update after every render, causing an infinite re-render loop that freezes the UI.",
                             loc,
                             codeSnippet: (0, ast_1.extractCodeSnippet)(ctx.lines, loc),
                             remediation: {
-                                summary: 'Add a dependency array to useEffect or remove the state update.',
-                                suggestedFix: 'useEffect(() => { ... }, []);',
-                                llmPromptHint: 'Add a dependency array [deps] to the useEffect hook or move the state setter outside.',
+                                summary: "Add a dependency array to useEffect or remove the state update.",
+                                suggestedFix: "useEffect(() => { ... }, []);",
+                                llmPromptHint: "Add a dependency array [deps] to the useEffect hook or move the state setter outside.",
                             },
                         });
                     },
@@ -222,11 +237,11 @@ exports.InfiniteRenderLoopRule = {
 // 4. Conditional React Hook Invocations (React Rules of Hooks)
 // =========================================================================
 exports.ConditionalHookRule = {
-    id: 'REACT-002',
-    name: 'Conditional Hook Invocation',
-    description: 'React Hooks must be called unconditionally at the top level of the component.',
-    category: 'REACT_HOOKS',
-    defaultSeverity: 'HIGH',
+    id: "REACT-002",
+    name: "Conditional Hook Invocation",
+    description: "React Hooks must be called unconditionally at the top level of the component.",
+    category: "REACT_HOOKS",
+    defaultSeverity: "HIGH",
     check: (ctx) => {
         (0, traverse_1.default)(ctx.ast, {
             CallExpression(path) {
@@ -263,15 +278,15 @@ exports.ConditionalHookRule = {
                     const loc = (0, ast_1.nodeToLocation)(path.node);
                     ctx.report({
                         id: `${ctx.filePath}:${loc.start.line}:${loc.start.column}:REACT-002`,
-                        ruleId: 'REACT-002',
-                        category: 'REACT_HOOKS',
-                        severity: 'HIGH',
+                        ruleId: "REACT-002",
+                        category: "REACT_HOOKS",
+                        severity: "HIGH",
                         message: `React Hook '${callee.name}' called inside a conditional or loop statement.`,
-                        explanation: 'React relies on the order in which Hooks are called. Calling hooks conditionally breaks state preservation across renders.',
+                        explanation: "React relies on the order in which Hooks are called. Calling hooks conditionally breaks state preservation across renders.",
                         loc,
                         codeSnippet: (0, ast_1.extractCodeSnippet)(ctx.lines, loc),
                         remediation: {
-                            summary: 'Move the hook call to the top level of the React component.',
+                            summary: "Move the hook call to the top level of the React component.",
                             llmPromptHint: `Refactor so '${callee.name}' is always called at the top level of the component; move conditionals inside the hook or effect.`,
                         },
                     });
@@ -283,7 +298,21 @@ exports.ConditionalHookRule = {
 // =========================================================================
 // 5. Hardcoded Secret / API Key Exposure (CWE-798)
 // =========================================================================
-const SECRET_NAME_KEYWORDS = ['apikey', 'api_key', 'secretkey', 'secret_key', 'privatekey', 'private_key', 'authtoken', 'auth_token', 'jwt_secret', 'accesskey', 'access_key', 'clientsecret', 'client_secret'];
+const SECRET_NAME_KEYWORDS = [
+    "apikey",
+    "api_key",
+    "secretkey",
+    "secret_key",
+    "privatekey",
+    "private_key",
+    "authtoken",
+    "auth_token",
+    "jwt_secret",
+    "accesskey",
+    "access_key",
+    "clientsecret",
+    "client_secret",
+];
 const SECRET_VALUE_PATTERNS = [
     /^sk_live_[0-9a-zA-Z]{16,}/, // Stripe live
     /^sk_test_[0-9a-zA-Z]{16,}/, // Stripe test
@@ -318,27 +347,27 @@ function isSecretLike(name, value) {
 function reportSecret(ctx, name, loc) {
     ctx.report({
         id: `${ctx.filePath}:${loc.start.line}:${loc.start.column}:SEC-003`,
-        ruleId: 'SEC-003',
-        cweId: 'CWE-798',
-        category: 'SECURITY',
-        severity: 'CRITICAL',
+        ruleId: "SEC-003",
+        cweId: "CWE-798",
+        category: "SECURITY",
+        severity: "CRITICAL",
         message: `Hardcoded secret detected in '${name}'.`,
-        explanation: 'Secrets hardcoded in frontend or React Native apps are bundled into client code and recoverable via apk/ipa extraction or bundle inspection.',
+        explanation: "Secrets hardcoded in frontend or React Native apps are bundled into client code and recoverable via apk/ipa extraction or bundle inspection.",
         loc,
         codeSnippet: (0, ast_1.extractCodeSnippet)(ctx.lines, loc),
         remediation: {
-            summary: 'Move the secret to a backend server or a build-time-injected vault; never ship it in the client bundle.',
+            summary: "Move the secret to a backend server or a build-time-injected vault; never ship it in the client bundle.",
             llmPromptHint: `Remove hardcoded credential '${name}'. Use secure backend authentication or a server proxy; client-side env vars are still extractable.`,
         },
     });
 }
 exports.HardcodedSecretsRule = {
-    id: 'SEC-003',
-    name: 'Hardcoded Secret or API Key in Client Bundle',
-    description: 'Hardcoded API secrets, private keys, or tokens in mobile/frontend code are easily extracted by decompilation.',
-    category: 'SECURITY',
-    defaultSeverity: 'CRITICAL',
-    cweId: 'CWE-798',
+    id: "SEC-003",
+    name: "Hardcoded Secret or API Key in Client Bundle",
+    description: "Hardcoded API secrets, private keys, or tokens in mobile/frontend code are easily extracted by decompilation.",
+    category: "SECURITY",
+    defaultSeverity: "CRITICAL",
+    cweId: "CWE-798",
     check: (ctx) => {
         (0, traverse_1.default)(ctx.ast, {
             // const apiKey = "sk_live_..."
@@ -368,7 +397,11 @@ exports.HardcodedSecretsRule = {
                 if (!t.isStringLiteral(path.node.value))
                     return;
                 const key = path.node.key;
-                const name = t.isIdentifier(key) ? key.name : t.isStringLiteral(key) ? key.value : null;
+                const name = t.isIdentifier(key)
+                    ? key.name
+                    : t.isStringLiteral(key)
+                        ? key.value
+                        : null;
                 if (name && isSecretLike(name, path.node.value.value)) {
                     reportSecret(ctx, name, (0, ast_1.nodeToLocation)(path.node));
                 }
@@ -381,12 +414,12 @@ exports.HardcodedSecretsRule = {
 // 6. Null Dereference via Abstract Interpretation (CWE-476)
 // =========================================================================
 exports.NullDereferenceRule = {
-    id: 'AI-NULL-001',
-    name: 'Potential Null / Undefined Dereference',
-    description: 'Accessing properties on values abstract interpretation proves can be null or undefined on some path.',
-    category: 'CORRECTNESS',
-    defaultSeverity: 'MEDIUM',
-    cweId: 'CWE-476',
+    id: "AI-NULL-001",
+    name: "Potential Null / Undefined Dereference",
+    description: "Accessing properties on values abstract interpretation proves can be null or undefined on some path.",
+    category: "CORRECTNESS",
+    defaultSeverity: "MEDIUM",
+    cweId: "CWE-476",
     check: (ctx) => {
         for (const cfg of ctx.cfgs) {
             if (!cfg.statementStates)
@@ -405,7 +438,8 @@ function walkStatement(stmt, stmtState, ctx) {
         if (t.isMemberExpression(expr) && !expr.optional) {
             const objectKey = t.isIdentifier(expr.object)
                 ? ctx.symbols.key(expr.object)
-                : t.isMemberExpression(expr.object) || t.isOptionalMemberExpression(expr.object)
+                : t.isMemberExpression(expr.object) ||
+                    t.isOptionalMemberExpression(expr.object)
                     ? ctx.symbols.keyForMember(expr.object)
                     : null;
             const varName = memberDisplayName(expr.object);
@@ -414,13 +448,13 @@ function walkStatement(stmt, stmtState, ctx) {
             // Flagging unknown ('Top') values drowns users in false positives.
             if (st && domain_1.NullabilityDomain.isKnownPossiblyNull(st.nullability)) {
                 const loc = (0, ast_1.nodeToLocation)(expr);
-                const definite = st.nullability === 'Null' || st.nullability === 'Undefined';
+                const definite = st.nullability === "Null" || st.nullability === "Undefined";
                 reportNullDeref(ctx, varName, expr.property.name, st.nullability, definite, loc);
             }
         }
     };
     const traverseNode = (curr, state) => {
-        if (!curr || typeof curr !== 'object')
+        if (!curr || typeof curr !== "object")
             return;
         // Never descend into nested function bodies: they are analyzed as their
         // own CFG roots. Checking them against the OUTER state would ignore the
@@ -433,9 +467,9 @@ function walkStatement(stmt, stmtState, ctx) {
         // `user && <Name>{user.name}</Name>`.
         if (t.isLogicalExpression(curr)) {
             traverseNode(curr.left, state);
-            const rightState = curr.operator === '&&'
+            const rightState = curr.operator === "&&"
                 ? (0, refine_1.refineState)(state, curr.left, true, ctx.symbols)
-                : curr.operator === '||'
+                : curr.operator === "||"
                     ? (0, refine_1.refineState)(state, curr.left, false, ctx.symbols)
                     : state;
             traverseNode(curr.right, rightState);
@@ -450,14 +484,16 @@ function walkStatement(stmt, stmtState, ctx) {
         if (t.isMemberExpression(curr))
             checkMember(curr, state);
         for (const key of Object.keys(curr)) {
-            if (key === 'loc' || key === 'leadingComments' || key === 'trailingComments')
+            if (key === "loc" ||
+                key === "leadingComments" ||
+                key === "trailingComments")
                 continue;
             const child = curr[key];
             if (Array.isArray(child)) {
                 for (const item of child)
                     traverseNode(item, state);
             }
-            else if (child && typeof child === 'object' && child.type) {
+            else if (child && typeof child === "object" && child.type) {
                 traverseNode(child, state);
             }
         }
@@ -473,10 +509,10 @@ function memberDisplayName(expr) {
             ? expr.property.name
             : t.isStringLiteral(expr.property) || t.isNumericLiteral(expr.property)
                 ? String(expr.property.value)
-                : '[computed]';
+                : "[computed]";
         return `${base}.${property}`;
     }
-    return '<expression>';
+    return "<expression>";
 }
 function isFunctionNode(n) {
     return (t.isFunctionDeclaration(n) ||
@@ -488,11 +524,11 @@ function isFunctionNode(n) {
 function reportNullDeref(ctx, varName, propName, nullability, definite, loc) {
     ctx.report({
         id: `${ctx.filePath}:${loc.start.line}:${loc.start.column}:AI-NULL-001`,
-        ruleId: 'AI-NULL-001',
-        cweId: 'CWE-476',
-        category: 'CORRECTNESS',
-        severity: definite ? 'HIGH' : 'MEDIUM',
-        message: `Possible ${definite ? '' : 'path-dependent '}null/undefined dereference on '${varName}.${propName}'.`,
+        ruleId: "AI-NULL-001",
+        cweId: "CWE-476",
+        category: "CORRECTNESS",
+        severity: definite ? "HIGH" : "MEDIUM",
+        message: `Possible ${definite ? "" : "path-dependent "}null/undefined dereference on '${varName}.${propName}'.`,
         explanation: `Abstract interpretation determined that '${varName}' has nullability state '${nullability}' at this program point.`,
         loc,
         codeSnippet: (0, ast_1.extractCodeSnippet)(ctx.lines, loc),
@@ -510,11 +546,11 @@ function reportNullDeref(ctx, varName, propName, nullability, definite, loc) {
 // 7. Taint Flow: Untrusted Value Reaches a Dangerous Sink (CWE-312 / CWE-79)
 // =========================================================================
 exports.TaintFlowRule = {
-    id: 'AI-TAINT-001',
-    name: 'Tainted Value Flows into Dangerous Sink',
-    description: 'An untrusted value (deep link, navigation params, unencrypted storage) flows into a dangerous sink.',
-    category: 'SECURITY',
-    defaultSeverity: 'HIGH',
+    id: "AI-TAINT-001",
+    name: "Tainted Value Flows into Dangerous Sink",
+    description: "An untrusted value (deep link, navigation params, unencrypted storage) flows into a dangerous sink.",
+    category: "SECURITY",
+    defaultSeverity: "HIGH",
     check: (ctx) => {
         for (const cfg of ctx.cfgs) {
             if (!cfg.statementStates)
@@ -527,18 +563,20 @@ exports.TaintFlowRule = {
                     if (setItemSink) {
                         ctx.report({
                             id: `${ctx.filePath}:${loc(setItemSink).start.line}:AI-TAINT-001`,
-                            ruleId: 'AI-TAINT-001',
-                            cweId: 'CWE-312',
-                            category: 'SECURITY',
-                            severity: 'HIGH',
-                            message: `Tainted value from '${setItemSink.sources.join(', ')}' flows into unencrypted AsyncStorage.`,
-                            explanation: 'Deep-link or navigation params persisted unencrypted can be manipulated on-device; store untrusted data only after validation.',
+                            ruleId: "AI-TAINT-001",
+                            cweId: "CWE-312",
+                            category: "SECURITY",
+                            severity: "HIGH",
+                            message: `Tainted value from '${setItemSink.sources.join(", ")}' flows into unencrypted AsyncStorage.`,
+                            explanation: "Deep-link or navigation params persisted unencrypted can be manipulated on-device; store untrusted data only after validation.",
                             loc: loc(setItemSink),
                             codeSnippet: (0, ast_1.extractCodeSnippet)(ctx.lines, loc(setItemSink)),
-                            abstractInvariants: { value: `Taint sources: ${setItemSink.sources.join(', ')}` },
+                            abstractInvariants: {
+                                value: `Taint sources: ${setItemSink.sources.join(", ")}`,
+                            },
                             remediation: {
-                                summary: 'Validate/sanitize the value, or use SecureStore if the data is sensitive.',
-                                llmPromptHint: 'Validate the untrusted value before persisting it, or switch to SecureStore for sensitive data.',
+                                summary: "Validate/sanitize the value, or use SecureStore if the data is sensitive.",
+                                llmPromptHint: "Validate the untrusted value before persisting it, or switch to SecureStore for sensitive data.",
                             },
                         });
                     }
@@ -547,40 +585,46 @@ exports.TaintFlowRule = {
                     if (webviewSink) {
                         ctx.report({
                             id: `${ctx.filePath}:${loc(webviewSink).start.line}:AI-TAINT-001`,
-                            ruleId: 'AI-TAINT-001',
-                            cweId: 'CWE-79',
-                            category: 'SECURITY',
-                            severity: 'HIGH',
-                            message: `Tainted value from '${webviewSink.sources.join(', ')}' reaches WebView ${webviewSink.prop}.`,
-                            explanation: 'Untrusted content rendered as WebView HTML/script executes with the page origin and can hit native bridge handlers (XSS).',
+                            ruleId: "AI-TAINT-001",
+                            cweId: "CWE-79",
+                            category: "SECURITY",
+                            severity: "HIGH",
+                            message: `Tainted value from '${webviewSink.sources.join(", ")}' reaches WebView ${webviewSink.prop}.`,
+                            explanation: "Untrusted content rendered as WebView HTML/script executes with the page origin and can hit native bridge handlers (XSS).",
                             loc: loc(webviewSink),
                             codeSnippet: (0, ast_1.extractCodeSnippet)(ctx.lines, loc(webviewSink)),
-                            abstractInvariants: { value: `Taint sources: ${webviewSink.sources.join(', ')}` },
+                            abstractInvariants: {
+                                value: `Taint sources: ${webviewSink.sources.join(", ")}`,
+                            },
                             remediation: {
-                                summary: 'Sanitize with DOMPurify or render natively.',
-                                llmPromptHint: 'Sanitize untrusted WebView content or render it with native components.',
+                                summary: "Sanitize with DOMPurify or render natively.",
+                                llmPromptHint: "Sanitize untrusted WebView content or render it with native components.",
                             },
                         });
                     }
                     const summarizedSink = findSummarizedSink(stmt, stmtState, ctx);
                     if (summarizedSink) {
-                        const destination = summarizedSink.prop === 'summarized WebView sink'
-                            ? 'a WebView sink through a helper function'
-                            : 'unencrypted AsyncStorage through a helper function';
+                        const destination = summarizedSink.prop === "summarized WebView sink"
+                            ? "a WebView sink through a helper function"
+                            : "unencrypted AsyncStorage through a helper function";
                         ctx.report({
                             id: `${ctx.filePath}:${loc(summarizedSink).start.line}:AI-TAINT-001-summary`,
-                            ruleId: 'AI-TAINT-001',
-                            cweId: summarizedSink.prop === 'summarized WebView sink' ? 'CWE-79' : 'CWE-312',
-                            category: 'SECURITY',
-                            severity: 'HIGH',
-                            message: `Tainted value from '${summarizedSink.sources.join(', ')}' reaches ${destination}.`,
-                            explanation: 'A bounded function summary proves that this argument flows to a dangerous sink in the called helper.',
+                            ruleId: "AI-TAINT-001",
+                            cweId: summarizedSink.prop === "summarized WebView sink"
+                                ? "CWE-79"
+                                : "CWE-312",
+                            category: "SECURITY",
+                            severity: "HIGH",
+                            message: `Tainted value from '${summarizedSink.sources.join(", ")}' reaches ${destination}.`,
+                            explanation: "A bounded function summary proves that this argument flows to a dangerous sink in the called helper.",
                             loc: loc(summarizedSink),
                             codeSnippet: (0, ast_1.extractCodeSnippet)(ctx.lines, loc(summarizedSink)),
-                            abstractInvariants: { value: `Taint sources: ${summarizedSink.sources.join(', ')}` },
+                            abstractInvariants: {
+                                value: `Taint sources: ${summarizedSink.sources.join(", ")}`,
+                            },
                             remediation: {
-                                summary: 'Validate or sanitize the argument before calling the helper.',
-                                llmPromptHint: 'Validate or sanitize the tainted argument before passing it to this sink-bearing helper.',
+                                summary: "Validate or sanitize the argument before calling the helper.",
+                                llmPromptHint: "Validate or sanitize the tainted argument before passing it to this sink-bearing helper.",
                             },
                         });
                     }
@@ -588,18 +632,20 @@ exports.TaintFlowRule = {
                     if (callbackSink) {
                         ctx.report({
                             id: `${ctx.filePath}:${loc(callbackSink).start.line}:AI-TAINT-001-callback`,
-                            ruleId: 'AI-TAINT-001',
-                            cweId: callbackSink.prop === 'WebView' ? 'CWE-79' : 'CWE-312',
-                            category: 'SECURITY',
-                            severity: 'HIGH',
-                            message: `Tainted collection element from '${callbackSink.sources.join(', ')}' reaches ${callbackSink.prop} inside a callback.`,
-                            explanation: 'The receiver is tainted and this standard collection callback passes each element into a dangerous sink.',
+                            ruleId: "AI-TAINT-001",
+                            cweId: callbackSink.prop === "WebView" ? "CWE-79" : "CWE-312",
+                            category: "SECURITY",
+                            severity: "HIGH",
+                            message: `Tainted collection element from '${callbackSink.sources.join(", ")}' reaches ${callbackSink.prop} inside a callback.`,
+                            explanation: "The receiver is tainted and this standard collection callback passes each element into a dangerous sink.",
                             loc: loc(callbackSink),
                             codeSnippet: (0, ast_1.extractCodeSnippet)(ctx.lines, loc(callbackSink)),
-                            abstractInvariants: { value: `Taint sources: ${callbackSink.sources.join(', ')}` },
+                            abstractInvariants: {
+                                value: `Taint sources: ${callbackSink.sources.join(", ")}`,
+                            },
                             remediation: {
-                                summary: 'Validate or sanitize each element before it reaches the sink.',
-                                llmPromptHint: 'Validate or sanitize the callback element before passing it to this sink.',
+                                summary: "Validate or sanitize each element before it reaches the sink.",
+                                llmPromptHint: "Validate or sanitize the callback element before passing it to this sink.",
                             },
                         });
                     }
@@ -626,10 +672,10 @@ function taintOf(expr, stmtState, ctx, depth = 0) {
     if (t.isCallExpression(expr)) {
         const name = summarizedCalleeName(expr.callee);
         const value = name ? ctx.functionSummaries.get(name)?.value : undefined;
-        if (value?.kind === 'PARAMETER' && !value.sanitized) {
+        if (value?.kind === "PARAMETER" && !value.sanitized) {
             const argument = expr.arguments[value.parameterIndex];
             if (argument && t.isIdentifier(argument) && value.fieldPath?.length) {
-                const state = stmtState.get([ctx.symbols.key(argument), ...value.fieldPath].join('.'));
+                const state = stmtState.get([ctx.symbols.key(argument), ...value.fieldPath].join("."));
                 return state?.taint.isTainted ? state.taint.sources : null;
             }
             return argument && t.isExpression(argument)
@@ -637,8 +683,10 @@ function taintOf(expr, stmtState, ctx, depth = 0) {
                 : null;
         }
     }
-    if (t.isTSAsExpression(expr) || t.isTSSatisfiesExpression(expr) ||
-        t.isTSTypeAssertion(expr) || t.isTSNonNullExpression(expr) ||
+    if (t.isTSAsExpression(expr) ||
+        t.isTSSatisfiesExpression(expr) ||
+        t.isTSTypeAssertion(expr) ||
+        t.isTSNonNullExpression(expr) ||
         t.isParenthesizedExpression(expr)) {
         return taintOf(expr.expression, stmtState, ctx, depth + 1);
     }
@@ -647,7 +695,7 @@ function taintOf(expr, stmtState, ctx, depth = 0) {
 function findSummarizedSink(stmt, stmtState, ctx) {
     let hit = null;
     const walk = (curr) => {
-        if (!curr || typeof curr !== 'object' || hit)
+        if (!curr || typeof curr !== "object" || hit)
             return;
         if (t.isCallExpression(curr)) {
             const name = summarizedCalleeName(curr.callee);
@@ -661,20 +709,24 @@ function findSummarizedSink(stmt, stmtState, ctx) {
                     hit = {
                         loc: (0, ast_1.nodeToLocation)(curr),
                         sources,
-                        prop: sink.kind === 'WEBVIEW' ? 'summarized WebView sink' : 'summarized storage sink',
+                        prop: sink.kind === "WEBVIEW"
+                            ? "summarized WebView sink"
+                            : "summarized storage sink",
                     };
                     return;
                 }
             }
         }
         for (const key of Object.keys(curr)) {
-            if (key === 'loc' || key === 'leadingComments' || key === 'trailingComments')
+            if (key === "loc" ||
+                key === "leadingComments" ||
+                key === "trailingComments")
                 continue;
             const child = curr[key];
             if (Array.isArray(child))
                 for (const item of child)
                     walk(item);
-            else if (child && typeof child === 'object' && child.type)
+            else if (child && typeof child === "object" && child.type)
                 walk(child);
         }
     };
@@ -684,24 +736,40 @@ function findSummarizedSink(stmt, stmtState, ctx) {
 function summarizedCalleeName(callee) {
     if (t.isIdentifier(callee))
         return callee.name;
-    if (t.isMemberExpression(callee) && !callee.computed &&
-        t.isIdentifier(callee.object) && t.isIdentifier(callee.property)) {
+    if (t.isMemberExpression(callee) &&
+        !callee.computed &&
+        t.isIdentifier(callee.object) &&
+        t.isIdentifier(callee.property)) {
         return `${callee.object.name}.${callee.property.name}`;
     }
     return null;
 }
-const ELEMENT_CALLBACKS = new Set(['forEach', 'map', 'filter', 'find', 'findIndex', 'some', 'every', 'flatMap']);
+const ELEMENT_CALLBACKS = new Set([
+    "forEach",
+    "map",
+    "filter",
+    "find",
+    "findIndex",
+    "some",
+    "every",
+    "flatMap",
+]);
 function findCollectionCallbackSink(stmt, stmtState, ctx) {
     let hit = null;
     const walk = (curr) => {
-        if (!curr || typeof curr !== 'object' || hit)
+        if (!curr || typeof curr !== "object" || hit)
             return;
-        if (t.isCallExpression(curr) && t.isMemberExpression(curr.callee) &&
-            !curr.callee.computed && t.isIdentifier(curr.callee.property) &&
-            ELEMENT_CALLBACKS.has(curr.callee.property.name) && t.isExpression(curr.callee.object)) {
+        if (t.isCallExpression(curr) &&
+            t.isMemberExpression(curr.callee) &&
+            !curr.callee.computed &&
+            t.isIdentifier(curr.callee.property) &&
+            ELEMENT_CALLBACKS.has(curr.callee.property.name) &&
+            t.isExpression(curr.callee.object)) {
             const sources = taintOf(curr.callee.object, stmtState, ctx);
             const callback = curr.arguments[0];
-            if (sources && (t.isArrowFunctionExpression(callback) || t.isFunctionExpression(callback))) {
+            if (sources &&
+                (t.isArrowFunctionExpression(callback) ||
+                    t.isFunctionExpression(callback))) {
                 const parameter = callback.params[0];
                 if (t.isIdentifier(parameter)) {
                     const sink = callbackParameterSink(callback.body, parameter.name, ctx);
@@ -713,13 +781,15 @@ function findCollectionCallbackSink(stmt, stmtState, ctx) {
             }
         }
         for (const key of Object.keys(curr)) {
-            if (key === 'loc' || key === 'leadingComments' || key === 'trailingComments')
+            if (key === "loc" ||
+                key === "leadingComments" ||
+                key === "trailingComments")
                 continue;
             const child = curr[key];
             if (Array.isArray(child))
                 for (const item of child)
                     walk(item);
-            else if (child && typeof child === 'object' && child.type)
+            else if (child && typeof child === "object" && child.type)
                 walk(child);
         }
     };
@@ -729,33 +799,37 @@ function findCollectionCallbackSink(stmt, stmtState, ctx) {
 function callbackParameterSink(body, parameterName, ctx) {
     let found = null;
     const walk = (curr) => {
-        if (!curr || typeof curr !== 'object' || found)
+        if (!curr || typeof curr !== "object" || found)
             return;
         if (curr !== body && isFunctionNode(curr))
             return;
         if (t.isCallExpression(curr)) {
             if (t.isMemberExpression(curr.callee) &&
-                t.isIdentifier(curr.callee.object, { name: 'AsyncStorage' }) &&
-                t.isIdentifier(curr.callee.property, { name: 'setItem' }) &&
+                t.isIdentifier(curr.callee.object, { name: "AsyncStorage" }) &&
+                t.isIdentifier(curr.callee.property, { name: "setItem" }) &&
                 t.isIdentifier(curr.arguments[1], { name: parameterName })) {
-                found = { node: curr, kind: 'AsyncStorage' };
+                found = { node: curr, kind: "AsyncStorage" };
                 return;
             }
             const name = summarizedCalleeName(curr.callee);
             const summary = name ? ctx.functionSummaries.get(name) : undefined;
-            if ((summary?.taintSinks ?? []).some((sink) => t.isIdentifier(curr.arguments[sink.parameterIndex], { name: parameterName }))) {
-                found = { node: curr, kind: 'a sink-bearing helper' };
+            if ((summary?.taintSinks ?? []).some((sink) => t.isIdentifier(curr.arguments[sink.parameterIndex], {
+                name: parameterName,
+            }))) {
+                found = { node: curr, kind: "a sink-bearing helper" };
                 return;
             }
         }
         for (const key of Object.keys(curr)) {
-            if (key === 'loc' || key === 'leadingComments' || key === 'trailingComments')
+            if (key === "loc" ||
+                key === "leadingComments" ||
+                key === "trailingComments")
                 continue;
             const child = curr[key];
             if (Array.isArray(child))
                 for (const item of child)
                     walk(item);
-            else if (child && typeof child === 'object' && child.type)
+            else if (child && typeof child === "object" && child.type)
                 walk(child);
         }
     };
@@ -765,29 +839,31 @@ function callbackParameterSink(body, parameterName, ctx) {
 function findSetItemSink(stmt, stmtState, ctx) {
     let hit = null;
     const walk = (curr) => {
-        if (!curr || typeof curr !== 'object' || hit)
+        if (!curr || typeof curr !== "object" || hit)
             return;
         if (t.isCallExpression(curr) && t.isMemberExpression(curr.callee)) {
             const c = curr.callee;
-            if (t.isIdentifier(c.object, { name: 'AsyncStorage' }) &&
-                t.isIdentifier(c.property, { name: 'setItem' })) {
+            if (t.isIdentifier(c.object, { name: "AsyncStorage" }) &&
+                t.isIdentifier(c.property, { name: "setItem" })) {
                 const valueArg = curr.arguments[1];
                 const sources = taintOf(valueArg, stmtState, ctx);
                 if (sources) {
-                    hit = { loc: (0, ast_1.nodeToLocation)(curr), sources, prop: 'setItem value' };
+                    hit = { loc: (0, ast_1.nodeToLocation)(curr), sources, prop: "setItem value" };
                     return;
                 }
             }
         }
         for (const key of Object.keys(curr)) {
-            if (key === 'loc' || key === 'leadingComments' || key === 'trailingComments')
+            if (key === "loc" ||
+                key === "leadingComments" ||
+                key === "trailingComments")
                 continue;
             const child = curr[key];
             if (Array.isArray(child)) {
                 for (const item of child)
                     walk(item);
             }
-            else if (child && typeof child === 'object' && child.type) {
+            else if (child && typeof child === "object" && child.type) {
                 walk(child);
             }
         }
@@ -798,20 +874,25 @@ function findSetItemSink(stmt, stmtState, ctx) {
 function findWebViewSink(stmt, stmtState, ctx) {
     let hit = null;
     const walk = (curr) => {
-        if (!curr || typeof curr !== 'object' || hit)
+        if (!curr || typeof curr !== "object" || hit)
             return;
-        if (t.isJSXElement(curr) && t.isJSXIdentifier(curr.openingElement.name, { name: 'WebView' })) {
+        if (t.isJSXElement(curr) &&
+            t.isJSXIdentifier(curr.openingElement.name, { name: "WebView" })) {
             for (const attr of curr.openingElement.attributes) {
                 if (!t.isJSXAttribute(attr) || !t.isJSXIdentifier(attr.name))
                     continue;
-                if (attr.name.name !== 'html' && attr.name.name !== 'injectedJavaScript' && attr.name.name !== 'source')
+                if (attr.name.name !== "html" &&
+                    attr.name.name !== "injectedJavaScript" &&
+                    attr.name.name !== "source")
                     continue;
                 let expr = null;
-                if (t.isJSXExpressionContainer(attr.value) && t.isIdentifier(attr.value.expression)) {
+                if (t.isJSXExpressionContainer(attr.value) &&
+                    t.isIdentifier(attr.value.expression)) {
                     expr = attr.value.expression;
                 }
-                else if (t.isJSXExpressionContainer(attr.value) && t.isObjectExpression(attr.value.expression)) {
-                    const htmlProp = attr.value.expression.properties.find((p) => t.isObjectProperty(p) && t.isIdentifier(p.key, { name: 'html' }));
+                else if (t.isJSXExpressionContainer(attr.value) &&
+                    t.isObjectExpression(attr.value.expression)) {
+                    const htmlProp = attr.value.expression.properties.find((p) => t.isObjectProperty(p) && t.isIdentifier(p.key, { name: "html" }));
                     const htmlVal = htmlProp?.value;
                     if (htmlProp && t.isIdentifier(htmlVal))
                         expr = htmlVal;
@@ -824,14 +905,16 @@ function findWebViewSink(stmt, stmtState, ctx) {
             }
         }
         for (const key of Object.keys(curr)) {
-            if (key === 'loc' || key === 'leadingComments' || key === 'trailingComments')
+            if (key === "loc" ||
+                key === "leadingComments" ||
+                key === "trailingComments")
                 continue;
             const child = curr[key];
             if (Array.isArray(child)) {
                 for (const item of child)
                     walk(item);
             }
-            else if (child && typeof child === 'object' && child.type) {
+            else if (child && typeof child === "object" && child.type) {
                 walk(child);
             }
         }
@@ -843,53 +926,53 @@ function findWebViewSink(stmt, stmtState, ctx) {
 // 8. eval / new Function (CWE-95)
 // =========================================================================
 exports.EvalRule = {
-    id: 'SEC-004',
-    name: 'Dynamic Code Evaluation',
-    description: 'eval() and new Function() execute arbitrary strings as code — a code-injection vector and CSP blocker.',
-    category: 'SECURITY',
-    defaultSeverity: 'HIGH',
-    cweId: 'CWE-95',
+    id: "SEC-004",
+    name: "Dynamic Code Evaluation",
+    description: "eval() and new Function() execute arbitrary strings as code — a code-injection vector and CSP blocker.",
+    category: "SECURITY",
+    defaultSeverity: "HIGH",
+    cweId: "CWE-95",
     check: (ctx) => {
         (0, traverse_1.default)(ctx.ast, {
             CallExpression(path) {
                 const c = path.node.callee;
-                const isEval = t.isIdentifier(c, { name: 'eval' });
+                const isEval = t.isIdentifier(c, { name: "eval" });
                 if (!isEval)
                     return;
                 const loc = (0, ast_1.nodeToLocation)(path.node);
                 ctx.report({
                     id: `${ctx.filePath}:${loc.start.line}:${loc.start.column}:SEC-004`,
-                    ruleId: 'SEC-004',
-                    cweId: 'CWE-95',
-                    category: 'SECURITY',
-                    severity: 'HIGH',
-                    message: isEval ? 'eval() used.' : 'new Function(...) used.',
-                    explanation: 'Dynamic code evaluation executes arbitrary strings; injected input becomes executable code, and it is blocked by default CSP.',
+                    ruleId: "SEC-004",
+                    cweId: "CWE-95",
+                    category: "SECURITY",
+                    severity: "HIGH",
+                    message: isEval ? "eval() used." : "new Function(...) used.",
+                    explanation: "Dynamic code evaluation executes arbitrary strings; injected input becomes executable code, and it is blocked by default CSP.",
                     loc,
                     codeSnippet: (0, ast_1.extractCodeSnippet)(ctx.lines, loc),
                     remediation: {
-                        summary: 'Replace dynamic evaluation with explicit logic, JSON.parse, or a lookup map.',
-                        llmPromptHint: 'Remove eval()/new Function() and replace with explicit branching or JSON.parse.',
+                        summary: "Replace dynamic evaluation with explicit logic, JSON.parse, or a lookup map.",
+                        llmPromptHint: "Remove eval()/new Function() and replace with explicit branching or JSON.parse.",
                     },
                 });
             },
             NewExpression(path) {
-                if (!t.isIdentifier(path.node.callee, { name: 'Function' }))
+                if (!t.isIdentifier(path.node.callee, { name: "Function" }))
                     return;
                 const loc = (0, ast_1.nodeToLocation)(path.node);
                 ctx.report({
                     id: `${ctx.filePath}:${loc.start.line}:${loc.start.column}:SEC-004`,
-                    ruleId: 'SEC-004',
-                    cweId: 'CWE-95',
-                    category: 'SECURITY',
-                    severity: 'HIGH',
-                    message: 'new Function(...) used.',
-                    explanation: 'new Function() compiles arbitrary strings into executable code, same risk profile as eval().',
+                    ruleId: "SEC-004",
+                    cweId: "CWE-95",
+                    category: "SECURITY",
+                    severity: "HIGH",
+                    message: "new Function(...) used.",
+                    explanation: "new Function() compiles arbitrary strings into executable code, same risk profile as eval().",
                     loc,
                     codeSnippet: (0, ast_1.extractCodeSnippet)(ctx.lines, loc),
                     remediation: {
-                        summary: 'Replace dynamic evaluation with explicit logic or JSON.parse.',
-                        llmPromptHint: 'Remove new Function() and replace with explicit branching or JSON.parse.',
+                        summary: "Replace dynamic evaluation with explicit logic or JSON.parse.",
+                        llmPromptHint: "Remove new Function() and replace with explicit branching or JSON.parse.",
                     },
                 });
             },
@@ -900,16 +983,18 @@ exports.EvalRule = {
 // 9. dangerouslySetInnerHTML (CWE-79)
 // =========================================================================
 exports.DangerousInnerHTMLRule = {
-    id: 'SEC-005',
-    name: 'Dynamic dangerouslySetInnerHTML',
-    description: 'dangerouslySetInnerHTML with dynamic content injects unsanitized HTML into the DOM.',
-    category: 'SECURITY',
-    defaultSeverity: 'HIGH',
-    cweId: 'CWE-79',
+    id: "SEC-005",
+    name: "Dynamic dangerouslySetInnerHTML",
+    description: "dangerouslySetInnerHTML with dynamic content injects unsanitized HTML into the DOM.",
+    category: "SECURITY",
+    defaultSeverity: "HIGH",
+    cweId: "CWE-79",
     check: (ctx) => {
         (0, traverse_1.default)(ctx.ast, {
             JSXAttribute(path) {
-                if (!t.isJSXIdentifier(path.node.name, { name: 'dangerouslySetInnerHTML' }))
+                if (!t.isJSXIdentifier(path.node.name, {
+                    name: "dangerouslySetInnerHTML",
+                }))
                     return;
                 const v = path.node.value;
                 if (!t.isJSXExpressionContainer(v))
@@ -917,28 +1002,32 @@ exports.DangerousInnerHTMLRule = {
                 const expr = v.expression;
                 // { __html: "static string" } and values passed through a sanitizer
                 // with verifiable import provenance are acceptable.
-                const isStaticObject = t.isObjectExpression(expr) && expr.properties.every((p) => t.isObjectProperty(p) && p.key && (t.isStringLiteral(p.value) || t.isNumericLiteral(p.value)));
+                const isStaticObject = t.isObjectExpression(expr) &&
+                    expr.properties.every((p) => t.isObjectProperty(p) &&
+                        p.key &&
+                        (t.isStringLiteral(p.value) || t.isNumericLiteral(p.value)));
                 const htmlProperty = t.isObjectExpression(expr)
                     ? expr.properties.find((p) => t.isObjectProperty(p) &&
-                        ((t.isIdentifier(p.key) && p.key.name === '__html') ||
-                            (t.isStringLiteral(p.key) && p.key.value === '__html')))
+                        ((t.isIdentifier(p.key) && p.key.name === "__html") ||
+                            (t.isStringLiteral(p.key) && p.key.value === "__html")))
                     : null;
-                if (isStaticObject || (htmlProperty && isSafeHtmlValue(htmlProperty.value, path)))
+                if (isStaticObject ||
+                    (htmlProperty && isSafeHtmlValue(htmlProperty.value, path)))
                     return;
                 const loc = (0, ast_1.nodeToLocation)(path.node);
                 ctx.report({
                     id: `${ctx.filePath}:${loc.start.line}:${loc.start.column}:SEC-005`,
-                    ruleId: 'SEC-005',
-                    cweId: 'CWE-79',
-                    category: 'SECURITY',
-                    severity: 'HIGH',
-                    message: 'Dynamic content passed to dangerouslySetInnerHTML.',
-                    explanation: 'Dynamic HTML injected into the DOM bypasses React escaping and enables XSS.',
+                    ruleId: "SEC-005",
+                    cweId: "CWE-79",
+                    category: "SECURITY",
+                    severity: "HIGH",
+                    message: "Dynamic content passed to dangerouslySetInnerHTML.",
+                    explanation: "Dynamic HTML injected into the DOM bypasses React escaping and enables XSS.",
                     loc,
                     codeSnippet: (0, ast_1.extractCodeSnippet)(ctx.lines, loc),
                     remediation: {
-                        summary: 'Sanitize the HTML with DOMPurify before injecting, or render as text content.',
-                        llmPromptHint: 'Sanitize the value passed to dangerouslySetInnerHTML (e.g. DOMPurify.sanitize) or render it as escaped text.',
+                        summary: "Sanitize the HTML with DOMPurify before injecting, or render as text content.",
+                        llmPromptHint: "Sanitize the value passed to dangerouslySetInnerHTML (e.g. DOMPurify.sanitize) or render it as escaped text.",
                     },
                 });
             },
@@ -948,16 +1037,17 @@ exports.DangerousInnerHTMLRule = {
 function isSafeHtmlValue(value, path) {
     if (t.isStringLiteral(value) || t.isNumericLiteral(value))
         return true;
-    if (t.isLogicalExpression(value) && (value.operator === '||' || value.operator === '??')) {
-        return isSafeHtmlValue(value.left, path) && isSafeHtmlValue(value.right, path);
+    if (t.isLogicalExpression(value) &&
+        (value.operator === "||" || value.operator === "??")) {
+        return (isSafeHtmlValue(value.left, path) && isSafeHtmlValue(value.right, path));
     }
     if (!t.isCallExpression(value))
         return false;
     const callee = value.callee;
     // Direct DOMPurify.sanitize(...).
     if (t.isMemberExpression(callee) &&
-        t.isIdentifier(callee.object, { name: 'DOMPurify' }) &&
-        t.isIdentifier(callee.property, { name: 'sanitize' })) {
+        t.isIdentifier(callee.object, { name: "DOMPurify" }) &&
+        t.isIdentifier(callee.property, { name: "sanitize" })) {
         return true;
     }
     // Project wrapper imported from a sanitizer module. Requiring both a
@@ -966,50 +1056,64 @@ function isSafeHtmlValue(value, path) {
     if (!t.isIdentifier(callee) || !/^sanitize(?:Html|Svg)?$/i.test(callee.name))
         return false;
     const binding = path.scope.getBinding(callee.name);
-    if (!binding?.path?.isImportSpecifier() && !binding?.path?.isImportDefaultSpecifier())
+    if (!binding?.path?.isImportSpecifier() &&
+        !binding?.path?.isImportDefaultSpecifier())
         return false;
     const declaration = binding.path.parentPath;
-    return declaration?.isImportDeclaration() && /(?:^|[/_-])sanitiz(?:e|er)(?:[/_.-]|$)/i.test(declaration.node.source.value);
+    return (declaration?.isImportDeclaration() &&
+        /(?:^|[/_-])sanitiz(?:e|er)(?:[/_.-]|$)/i.test(declaration.node.source.value));
 }
 // =========================================================================
 // 10. localStorage / sessionStorage Secrets (CWE-922)
 // =========================================================================
 exports.LocalStorageSecretsRule = {
-    id: 'SEC-006',
-    name: 'Sensitive Data in Web localStorage',
-    description: 'localStorage/sessionStorage is unencrypted and readable by any script on the page (XSS exfiltration).',
-    category: 'SECURITY',
-    defaultSeverity: 'HIGH',
-    cweId: 'CWE-922',
+    id: "SEC-006",
+    name: "Sensitive Data in Web localStorage",
+    description: "localStorage/sessionStorage is unencrypted and readable by any script on the page (XSS exfiltration).",
+    category: "SECURITY",
+    defaultSeverity: "HIGH",
+    cweId: "CWE-922",
     check: (ctx) => {
         (0, traverse_1.default)(ctx.ast, {
             CallExpression(path) {
                 const c = path.node.callee;
-                if (!t.isMemberExpression(c) || !t.isIdentifier(c.property, { name: 'setItem' }))
+                if (!t.isMemberExpression(c) ||
+                    !t.isIdentifier(c.property, { name: "setItem" }))
                     return;
-                if (!t.isIdentifier(c.object) || !/^(localStorage|sessionStorage)$/.test(c.object.name))
+                if (!t.isIdentifier(c.object) ||
+                    !/^(localStorage|sessionStorage)$/.test(c.object.name))
                     return;
                 const [keyArg] = path.node.arguments;
                 if (!t.isStringLiteral(keyArg))
                     return;
                 const key = keyArg.value.toLowerCase();
-                const sensitive = ['token', 'auth', 'jwt', 'secret', 'password', 'session', 'credential', 'apikey', 'api_key'];
+                const sensitive = [
+                    "token",
+                    "auth",
+                    "jwt",
+                    "secret",
+                    "password",
+                    "session",
+                    "credential",
+                    "apikey",
+                    "api_key",
+                ];
                 if (!sensitive.some((kw) => key.includes(kw)))
                     return;
                 const loc = (0, ast_1.nodeToLocation)(path.node);
                 ctx.report({
                     id: `${ctx.filePath}:${loc.start.line}:${loc.start.column}:SEC-006`,
-                    ruleId: 'SEC-006',
-                    cweId: 'CWE-922',
-                    category: 'SECURITY',
-                    severity: 'HIGH',
+                    ruleId: "SEC-006",
+                    cweId: "CWE-922",
+                    category: "SECURITY",
+                    severity: "HIGH",
                     message: `Sensitive key "${keyArg.value}" stored in web localStorage.`,
-                    explanation: 'Any XSS on the page can read localStorage; tokens and credentials must not be stored there.',
+                    explanation: "Any XSS on the page can read localStorage; tokens and credentials must not be stored there.",
                     loc,
                     codeSnippet: (0, ast_1.extractCodeSnippet)(ctx.lines, loc),
                     remediation: {
-                        summary: 'Use httpOnly secure cookies set by the backend, or in-memory storage with silent refresh.',
-                        llmPromptHint: 'Move the token out of localStorage; use httpOnly cookies from the backend or in-memory token storage.',
+                        summary: "Use httpOnly secure cookies set by the backend, or in-memory storage with silent refresh.",
+                        llmPromptHint: "Move the token out of localStorage; use httpOnly cookies from the backend or in-memory token storage.",
                     },
                 });
             },
@@ -1035,6 +1139,7 @@ exports.ALL_RULES = [
     ...application_security_rules_1.APPLICATION_SECURITY_RULES,
     ...correctness_rules_1.CORRECTNESS_RULES,
     ...react_correctness_rules_1.REACT_CORRECTNESS_RULES,
+    ...react19_rules_1.REACT19_RULES,
     ...reliability_rules_1.RELIABILITY_RULES,
     ...semantic_rules_1.SEMANTIC_RULES,
     ...mobile_config_rules_1.MOBILE_CONFIG_RULES,

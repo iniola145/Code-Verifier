@@ -1,4 +1,4 @@
-import { DiagnosticSeverity } from './types/verifier';
+import { DiagnosticSeverity } from "./types/verifier";
 export interface VerifierConfig {
     exclude: string[];
     disable: string[];

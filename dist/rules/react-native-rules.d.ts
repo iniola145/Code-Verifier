@@ -1,4 +1,4 @@
-import { VerificationRule } from '../types/verifier';
+import { VerificationRule } from "../types/verifier";
 export declare const InsecureAsyncStorageRule: VerificationRule;
 export declare const WebViewInjectionRule: VerificationRule;
 export declare const InfiniteRenderLoopRule: VerificationRule;

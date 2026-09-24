@@ -1,4 +1,4 @@
-import { DiagnosticSeverity, VerificationResult } from './types/verifier';
+import { DiagnosticSeverity, VerificationResult } from "./types/verifier";
 interface Options {
     projectRoot: string;
     baselineFingerprints?: ReadonlySet<string>;

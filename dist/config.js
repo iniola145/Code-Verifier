@@ -38,13 +38,30 @@ exports.globToRegExp = globToRegExp;
 exports.isExcluded = isExcluded;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
-const DEFAULT_CONFIG = { exclude: [], disable: [], severities: {}, failOn: 'MEDIUM' };
-const VALID_SEVERITIES = new Set(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']);
-const CONFIG_KEYS = new Set(['exclude', 'disable', 'severities', 'baseline', 'failOn']);
+const DEFAULT_CONFIG = {
+    exclude: [],
+    disable: [],
+    severities: {},
+    failOn: "MEDIUM",
+};
+const VALID_SEVERITIES = new Set([
+    "CRITICAL",
+    "HIGH",
+    "MEDIUM",
+    "LOW",
+    "INFO",
+]);
+const CONFIG_KEYS = new Set([
+    "exclude",
+    "disable",
+    "severities",
+    "baseline",
+    "failOn",
+]);
 function validateStringArray(raw, key, errors) {
     if (raw === undefined)
         return [];
-    if (!Array.isArray(raw) || raw.some((value) => typeof value !== 'string')) {
+    if (!Array.isArray(raw) || raw.some((value) => typeof value !== "string")) {
         errors.push(`"${key}" must be an array of strings.`);
         return [];
     }
@@ -54,7 +71,7 @@ function validateSeverities(raw, errors) {
     const out = {};
     if (raw === undefined)
         return out;
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
         errors.push('"severities" must be an object mapping rule ids to severities.');
         return out;
     }
@@ -73,12 +90,16 @@ function validateSeverities(raw, errors) {
 function loadConfig(startDir) {
     let dir = path.resolve(startDir);
     while (true) {
-        const candidate = path.join(dir, '.codeverifier.json');
+        const candidate = path.join(dir, ".codeverifier.json");
         if (fs.existsSync(candidate)) {
             try {
-                const raw = JSON.parse(fs.readFileSync(candidate, 'utf8'));
-                if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-                    return { config: DEFAULT_CONFIG, configPath: candidate, errors: ['Configuration root must be an object.'] };
+                const raw = JSON.parse(fs.readFileSync(candidate, "utf8"));
+                if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+                    return {
+                        config: DEFAULT_CONFIG,
+                        configPath: candidate,
+                        errors: ["Configuration root must be an object."],
+                    };
                 }
                 const value = raw;
                 const errors = [];
@@ -86,27 +107,34 @@ function loadConfig(startDir) {
                     if (!CONFIG_KEYS.has(key))
                         errors.push(`Unknown configuration key "${key}".`);
                 }
-                const failOn = value.failOn === undefined ? 'MEDIUM' : value.failOn;
+                const failOn = value.failOn === undefined ? "MEDIUM" : value.failOn;
                 if (!VALID_SEVERITIES.has(failOn)) {
                     errors.push('"failOn" must be CRITICAL, HIGH, MEDIUM, LOW, or INFO.');
                 }
-                if (value.baseline !== undefined && typeof value.baseline !== 'string') {
+                if (value.baseline !== undefined &&
+                    typeof value.baseline !== "string") {
                     errors.push('"baseline" must be a file path string.');
                 }
                 return {
                     config: {
-                        exclude: validateStringArray(value.exclude, 'exclude', errors),
-                        disable: validateStringArray(value.disable, 'disable', errors),
+                        exclude: validateStringArray(value.exclude, "exclude", errors),
+                        disable: validateStringArray(value.disable, "disable", errors),
                         severities: validateSeverities(value.severities, errors),
-                        baseline: typeof value.baseline === 'string' ? value.baseline : undefined,
-                        failOn: VALID_SEVERITIES.has(failOn) ? failOn : 'MEDIUM',
+                        baseline: typeof value.baseline === "string" ? value.baseline : undefined,
+                        failOn: VALID_SEVERITIES.has(failOn)
+                            ? failOn
+                            : "MEDIUM",
                     },
                     configPath: candidate,
                     errors,
                 };
             }
             catch (error) {
-                return { config: DEFAULT_CONFIG, configPath: candidate, errors: [`Could not parse configuration: ${error.message}`] };
+                return {
+                    config: DEFAULT_CONFIG,
+                    configPath: candidate,
+                    errors: [`Could not parse configuration: ${error.message}`],
+                };
             }
         }
         const parent = path.dirname(dir);
@@ -121,23 +149,23 @@ function loadConfig(startDir) {
  * the root.
  */
 function globToRegExp(pattern) {
-    const leadingGlobstar = pattern.startsWith('**/');
+    const leadingGlobstar = pattern.startsWith("**/");
     const core = leadingGlobstar ? pattern.slice(3) : pattern;
-    let re = '';
+    let re = "";
     for (let i = 0; i < core.length; i++) {
         const ch = core[i];
-        if (core.startsWith('**', i)) {
-            re += '.*';
+        if (core.startsWith("**", i)) {
+            re += ".*";
             i++;
         }
-        else if (ch === '*') {
-            re += '[^/]*';
+        else if (ch === "*") {
+            re += "[^/]*";
         }
-        else if (ch === '?') {
-            re += '[^/]';
+        else if (ch === "?") {
+            re += "[^/]";
         }
-        else if ('\\^$.+?()[]{}|/'.includes(ch)) {
-            re += '\\' + ch;
+        else if ("\\^$.+?()[]{}|/".includes(ch)) {
+            re += "\\" + ch;
         }
         else {
             re += ch;
@@ -148,7 +176,7 @@ function globToRegExp(pattern) {
 }
 /** True when a path matches any exclude glob (also tried on the basename). */
 function isExcluded(filePath, patterns) {
-    const normalized = filePath.split(path.sep).join('/');
+    const normalized = filePath.split(path.sep).join("/");
     for (const p of patterns) {
         try {
             const re = globToRegExp(p);

@@ -46,32 +46,47 @@ class ScanCache {
     constructor(filePath) {
         this.filePath = filePath;
         try {
-            const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-            this.entries = parsed.version === 1 && parsed.entries ? parsed.entries : {};
+            const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+            this.entries =
+                parsed.version === 1 && parsed.entries ? parsed.entries : {};
         }
         catch {
             this.entries = {};
         }
     }
-    get(key) { return this.entries[key]; }
-    set(key, value) { this.entries[key] = value; }
+    get(key) {
+        return this.entries[key];
+    }
+    set(key, value) {
+        this.entries[key] = value;
+    }
     save() {
         fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-        fs.writeFileSync(this.filePath, `${JSON.stringify({ version: 1, entries: this.entries })}\n`, 'utf8');
+        fs.writeFileSync(this.filePath, `${JSON.stringify({ version: 1, entries: this.entries })}\n`, "utf8");
     }
 }
 exports.ScanCache = ScanCache;
 function projectSignature(files) {
-    const hash = (0, crypto_1.createHash)('sha256');
+    const hash = (0, crypto_1.createHash)("sha256");
     for (const file of [...files].sort()) {
         const stat = fs.statSync(file);
-        hash.update(path.resolve(file)).update('\0').update(String(stat.size)).update('\0').update(String(stat.mtimeMs));
+        hash
+            .update(path.resolve(file))
+            .update("\0")
+            .update(String(stat.size))
+            .update("\0")
+            .update(String(stat.mtimeMs));
     }
-    return hash.digest('hex');
+    return hash.digest("hex");
 }
 function fileCacheKey(filePath, signature, optionsIdentity) {
-    return (0, crypto_1.createHash)('sha256').update(fs.readFileSync(filePath)).update('\0').update(signature)
-        .update('\0').update(optionsIdentity).digest('hex');
+    return (0, crypto_1.createHash)("sha256")
+        .update(fs.readFileSync(filePath))
+        .update("\0")
+        .update(signature)
+        .update("\0")
+        .update(optionsIdentity)
+        .digest("hex");
 }
 async function mapWithConcurrency(items, concurrency, work) {
     const results = new Array(items.length);

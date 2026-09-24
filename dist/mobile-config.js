@@ -37,11 +37,25 @@ exports.verifyMobileConfigs = verifyMobileConfigs;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const baseline_1 = require("./baseline");
-const CONFIG_NAMES = new Set(['app.json', 'AndroidManifest.xml', 'Info.plist']);
+const CONFIG_NAMES = new Set(["app.json", "AndroidManifest.xml", "Info.plist"]);
 const SKIP_DIRS = new Set([
-    'node_modules', 'dist', 'build', '.git', '.expo', '.gradle', 'coverage', 'Pods', 'DerivedData',
+    "node_modules",
+    "dist",
+    "build",
+    ".git",
+    ".expo",
+    ".gradle",
+    "coverage",
+    "Pods",
+    "DerivedData",
 ]);
-const RANK = { CRITICAL: 5, HIGH: 4, MEDIUM: 3, LOW: 2, INFO: 1 };
+const RANK = {
+    CRITICAL: 5,
+    HIGH: 4,
+    MEDIUM: 3,
+    LOW: 2,
+    INFO: 1,
+};
 function verifyMobileConfigs(targets, options) {
     return discoverConfigFiles(targets).map((file) => verifyMobileConfig(file, options));
 }
@@ -73,7 +87,7 @@ function discoverConfigFiles(targets) {
 }
 function verifyMobileConfig(filePath, options) {
     const startTime = Date.now();
-    const code = fs.readFileSync(filePath, 'utf8');
+    const code = fs.readFileSync(filePath, "utf8");
     const lines = code.split(/\r?\n/);
     const diagnostics = [];
     // Debug source-set overlays (src/debug/, src/debugOptimized/, ...) merge
@@ -85,71 +99,87 @@ function verifyMobileConfig(filePath, options) {
         const index = lines.findIndex((line) => line.includes(search));
         const line = index >= 0 ? index + 1 : 1;
         diagnostics.push({
-            id: `${filePath}:${line}:0:${ruleId}`, ruleId, category: 'SECURITY', severity, message, explanation,
-            filePath, loc: { start: { line, column: 0 }, end: { line, column: lines[index]?.length ?? 0 } },
-            codeSnippet: lines[index] ?? '', remediation: { summary: remediation, llmPromptHint: remediation },
+            id: `${filePath}:${line}:0:${ruleId}`,
+            ruleId,
+            category: "SECURITY",
+            severity,
+            message,
+            explanation,
+            filePath,
+            loc: {
+                start: { line, column: 0 },
+                end: { line, column: lines[index]?.length ?? 0 },
+            },
+            codeSnippet: lines[index] ?? "",
+            remediation: { summary: remediation, llmPromptHint: remediation },
         });
     };
     try {
-        if (path.basename(filePath) === 'app.json') {
+        if (path.basename(filePath) === "app.json") {
             const root = JSON.parse(code);
             const expo = root.expo ?? root;
             if (expo.android?.allowBackup === true)
-                report('MOB-001', 'MEDIUM', 'Expo Android configuration explicitly enables application backup.', 'Backups can include locally stored application data unless sensitive paths are explicitly excluded.', 'Disable backup for sensitive applications or define narrowly scoped Android backup and extraction rules.', 'allowBackup');
+                report("MOB-001", "MEDIUM", "Expo Android configuration explicitly enables application backup.", "Backups can include locally stored application data unless sensitive paths are explicitly excluded.", "Disable backup for sensitive applications or define narrowly scoped Android backup and extraction rules.", "allowBackup");
             if (expo.android?.usesCleartextTraffic === true)
-                report('MOB-002', 'HIGH', 'Expo Android configuration permits cleartext network traffic.', 'Cleartext HTTP traffic can be observed or modified in transit.', 'Disable cleartext traffic and use HTTPS; use a narrow network security exception only when unavoidable.', 'usesCleartextTraffic');
-            if (expo.ios?.infoPlist?.NSAppTransportSecurity?.NSAllowsArbitraryLoads === true)
-                report('MOB-002', 'HIGH', 'Expo iOS configuration disables App Transport Security globally.', 'Global arbitrary loads permit insecure HTTP and weaken platform transport requirements.', 'Remove NSAllowsArbitraryLoads or replace it with the narrowest justified domain exception.', 'NSAllowsArbitraryLoads');
+                report("MOB-002", "HIGH", "Expo Android configuration permits cleartext network traffic.", "Cleartext HTTP traffic can be observed or modified in transit.", "Disable cleartext traffic and use HTTPS; use a narrow network security exception only when unavoidable.", "usesCleartextTraffic");
+            if (expo.ios?.infoPlist?.NSAppTransportSecurity?.NSAllowsArbitraryLoads ===
+                true)
+                report("MOB-002", "HIGH", "Expo iOS configuration disables App Transport Security globally.", "Global arbitrary loads permit insecure HTTP and weaken platform transport requirements.", "Remove NSAllowsArbitraryLoads or replace it with the narrowest justified domain exception.", "NSAllowsArbitraryLoads");
             if (expo.ios?.infoPlist?.UIFileSharingEnabled === true)
-                report('MOB-005', 'MEDIUM', 'Expo iOS configuration enables document sharing.', 'Files in the application Documents directory become available through Finder or iTunes and may include sensitive application data.', 'Disable UIFileSharingEnabled unless it is a deliberate product feature, and keep secrets outside Documents.', 'UIFileSharingEnabled');
-            const riskyPermissions = new Set(['READ_SMS', 'RECEIVE_SMS', 'MANAGE_EXTERNAL_STORAGE', 'REQUEST_INSTALL_PACKAGES']);
+                report("MOB-005", "MEDIUM", "Expo iOS configuration enables document sharing.", "Files in the application Documents directory become available through Finder or iTunes and may include sensitive application data.", "Disable UIFileSharingEnabled unless it is a deliberate product feature, and keep secrets outside Documents.", "UIFileSharingEnabled");
+            const riskyPermissions = new Set([
+                "READ_SMS",
+                "RECEIVE_SMS",
+                "MANAGE_EXTERNAL_STORAGE",
+                "REQUEST_INSTALL_PACKAGES",
+            ]);
             for (const permission of expo.android?.permissions ?? []) {
-                const shortName = String(permission).replace(/^android\.permission\./, '');
+                const shortName = String(permission).replace(/^android\.permission\./, "");
                 if (riskyPermissions.has(shortName))
-                    report('MOB-006', 'HIGH', `Expo configuration requests high-risk Android permission '${shortName}'.`, 'This permission grants unusually broad access or enables sensitive platform behavior and increases compromise impact.', 'Remove the permission unless it is essential; otherwise document the use case and constrain the affected feature.', String(permission));
+                    report("MOB-006", "HIGH", `Expo configuration requests high-risk Android permission '${shortName}'.`, "This permission grants unusually broad access or enables sensitive platform behavior and increases compromise impact.", "Remove the permission unless it is essential; otherwise document the use case and constrain the affected feature.", String(permission));
             }
         }
-        else if (path.basename(filePath) === 'AndroidManifest.xml') {
+        else if (path.basename(filePath) === "AndroidManifest.xml") {
             if (/android:allowBackup\s*=\s*["']true["']/.test(code)) {
                 // Scoped backup/exclusion rules configured on the same manifest make
                 // this an advisory check, not a likely data-exposure default.
                 const hasScopedRules = /android:(?:fullBackupContent|dataExtractionRules)\s*=\s*["'][^"']+["']/.test(code);
-                report('MOB-001', hasScopedRules ? 'LOW' : 'MEDIUM', hasScopedRules
-                    ? 'Android manifest enables application backup with scoped exclusion rules configured.'
-                    : 'Android manifest explicitly enables application backup.', hasScopedRules
-                    ? 'Backup is only as safe as its exclusion rules; verify fullBackupContent/dataExtractionRules cover every sensitive path, including data written by dependencies.'
-                    : 'Backups can disclose sensitive local data when exclusion rules are incomplete.', 'Disable backup or configure dataExtractionRules/fullBackupContent to exclude every sensitive path.', 'allowBackup');
+                report("MOB-001", hasScopedRules ? "LOW" : "MEDIUM", hasScopedRules
+                    ? "Android manifest enables application backup with scoped exclusion rules configured."
+                    : "Android manifest explicitly enables application backup.", hasScopedRules
+                    ? "Backup is only as safe as its exclusion rules; verify fullBackupContent/dataExtractionRules cover every sensitive path, including data written by dependencies."
+                    : "Backups can disclose sensitive local data when exclusion rules are incomplete.", "Disable backup or configure dataExtractionRules/fullBackupContent to exclude every sensitive path.", "allowBackup");
             }
             if (/android:usesCleartextTraffic\s*=\s*["']true["']/.test(code))
-                report('MOB-002', debugOverlay ? 'LOW' : 'HIGH', debugOverlay
-                    ? 'Debug build overlay permits cleartext network traffic (expected for development).'
-                    : 'Android manifest permits cleartext network traffic.', debugOverlay
-                    ? 'Cleartext traffic in a debug source set never ships to release builds; keep dev-only settings out of the main and release manifests.'
-                    : 'Cleartext HTTP can be intercepted or modified.', 'Set usesCleartextTraffic to false and use narrowly scoped network security configuration exceptions.', 'usesCleartextTraffic');
+                report("MOB-002", debugOverlay ? "LOW" : "HIGH", debugOverlay
+                    ? "Debug build overlay permits cleartext network traffic (expected for development)."
+                    : "Android manifest permits cleartext network traffic.", debugOverlay
+                    ? "Cleartext traffic in a debug source set never ships to release builds; keep dev-only settings out of the main and release manifests."
+                    : "Cleartext HTTP can be intercepted or modified.", "Set usesCleartextTraffic to false and use narrowly scoped network security configuration exceptions.", "usesCleartextTraffic");
             if (/android:debuggable\s*=\s*["']true["']/.test(code))
-                report('MOB-004', debugOverlay ? 'LOW' : 'HIGH', debugOverlay
-                    ? 'Debug build overlay marks the application as debuggable (expected for development).'
-                    : 'Android manifest explicitly marks the application as debuggable.', debugOverlay
-                    ? 'Debuggable debug builds are expected for tooling; ensure release builds never inherit this attribute.'
-                    : 'Debuggable production applications expose additional inspection and control capabilities to attackers.', 'Remove the attribute from the release manifest or set it to false in production builds.', 'debuggable');
+                report("MOB-004", debugOverlay ? "LOW" : "HIGH", debugOverlay
+                    ? "Debug build overlay marks the application as debuggable (expected for development)."
+                    : "Android manifest explicitly marks the application as debuggable.", debugOverlay
+                    ? "Debuggable debug builds are expected for tooling; ensure release builds never inherit this attribute."
+                    : "Debuggable production applications expose additional inspection and control capabilities to attackers.", "Remove the attribute from the release manifest or set it to false in production builds.", "debuggable");
             const components = /<(activity|activity-alias|service|receiver|provider)\b[^>]*android:exported\s*=\s*["']true["'][^>]*>/g;
             for (const match of code.matchAll(components)) {
                 if (/android:permission\s*=/.test(match[0]))
                     continue;
                 // The launcher entry activity MUST be exported for the app to open —
                 // flagging it would fire on every Android app's most common pattern.
-                if ((match[1] === 'activity' || match[1] === 'activity-alias') &&
+                if ((match[1] === "activity" || match[1] === "activity-alias") &&
                     !/\/>\s*$/.test(match[0]) &&
                     hasLauncherIntentFilter(code, (match.index ?? 0) + match[0].length, match[1]))
                     continue;
-                report('MOB-003', 'HIGH', `Exported Android ${match[1]} has no manifest permission.`, 'Other applications may invoke an exported component; sensitive behavior without an access check can become a confused-deputy path.', 'Set exported=false unless external access is required, or protect the component with an appropriate signature permission and runtime checks.', match[0]);
+                report("MOB-003", "HIGH", `Exported Android ${match[1]} has no manifest permission.`, "Other applications may invoke an exported component; sensitive behavior without an access check can become a confused-deputy path.", "Set exported=false unless external access is required, or protect the component with an appropriate signature permission and runtime checks.", match[0]);
             }
         }
-        else if (path.basename(filePath) === 'Info.plist') {
+        else if (path.basename(filePath) === "Info.plist") {
             if (/<key>NSAllowsArbitraryLoads<\/key>\s*<true\s*\/>/.test(code))
-                report('MOB-002', 'HIGH', 'Info.plist disables App Transport Security globally.', 'Global arbitrary loads permit insecure HTTP and weaken platform transport requirements.', 'Remove NSAllowsArbitraryLoads or use a narrowly scoped, justified exception domain.', 'NSAllowsArbitraryLoads');
+                report("MOB-002", "HIGH", "Info.plist disables App Transport Security globally.", "Global arbitrary loads permit insecure HTTP and weaken platform transport requirements.", "Remove NSAllowsArbitraryLoads or use a narrowly scoped, justified exception domain.", "NSAllowsArbitraryLoads");
             if (/<key>UIFileSharingEnabled<\/key>\s*<true\s*\/>/.test(code))
-                report('MOB-005', 'MEDIUM', 'Info.plist enables document sharing.', 'Files in the application Documents directory become available through Finder or iTunes and may include sensitive application data.', 'Disable UIFileSharingEnabled unless it is intentional, and keep secrets outside Documents.', 'UIFileSharingEnabled');
+                report("MOB-005", "MEDIUM", "Info.plist enables document sharing.", "Files in the application Documents directory become available through Finder or iTunes and may include sensitive application data.", "Disable UIFileSharingEnabled unless it is intentional, and keep secrets outside Documents.", "UIFileSharingEnabled");
         }
     }
     catch (error) {
@@ -162,17 +192,32 @@ function verifyMobileConfig(filePath, options) {
         ? { ...item, severity: options.severityOverrides[item.ruleId] }
         : item)
         .map((item) => ({
-        ...item, fingerprint: (0, baseline_1.diagnosticFingerprint)(item, lines, options.projectRoot), confidence: 'HIGH',
+        ...item,
+        fingerprint: (0, baseline_1.diagnosticFingerprint)(item, lines, options.projectRoot),
+        confidence: "HIGH",
     }));
     const active = fingerprinted.filter((item) => !options.baselineFingerprints?.has(item.fingerprint));
-    const failOn = options.failOn ?? 'MEDIUM';
+    const failOn = options.failOn ?? "MEDIUM";
     const blocking = active.filter((item) => RANK[item.severity] >= RANK[failOn]).length;
-    const status = blocking > 0 ? 'FAILED' : 'PASSED';
+    const status = blocking > 0 ? "FAILED" : "PASSED";
     return {
-        filePath, status, passed: status === 'PASSED', diagnostics: active,
-        checks: [{ id: 'mobile-config', name: 'Mobile platform configuration', status: 'PASSED', required: true }],
+        filePath,
+        status,
+        passed: status === "PASSED",
+        diagnostics: active,
+        checks: [
+            {
+                id: "mobile-config",
+                name: "Mobile platform configuration",
+                status: "PASSED",
+                required: true,
+            },
+        ],
         stats: {
-            totalLines: lines.length, blocksAnalyzed: 0, rulesChecked: 6, executionTimeMs: Date.now() - startTime,
+            totalLines: lines.length,
+            blocksAnalyzed: 0,
+            rulesChecked: 6,
+            executionTimeMs: Date.now() - startTime,
             baselineSuppressed: fingerprinted.length - active.length,
             issuesCount: countSeverities(active),
         },
@@ -200,19 +245,36 @@ function hasLauncherIntentFilter(code, tagEnd, tagName) {
 }
 function countSeverities(items) {
     return {
-        critical: items.filter((item) => item.severity === 'CRITICAL').length,
-        high: items.filter((item) => item.severity === 'HIGH').length,
-        medium: items.filter((item) => item.severity === 'MEDIUM').length,
-        low: items.filter((item) => item.severity === 'LOW').length,
-        info: items.filter((item) => item.severity === 'INFO').length,
+        critical: items.filter((item) => item.severity === "CRITICAL").length,
+        high: items.filter((item) => item.severity === "HIGH").length,
+        medium: items.filter((item) => item.severity === "MEDIUM").length,
+        low: items.filter((item) => item.severity === "LOW").length,
+        info: items.filter((item) => item.severity === "INFO").length,
     };
 }
 function configParseFailure(filePath, totalLines, duration, message) {
     return {
-        filePath, status: 'INCOMPLETE', passed: false, diagnostics: [],
-        checks: [{ id: 'mobile-config', name: 'Mobile platform configuration', status: 'INCOMPLETE', required: true, message }],
-        stats: { totalLines, blocksAnalyzed: 0, rulesChecked: 6, executionTimeMs: duration,
-            issuesCount: { critical: 0, high: 0, medium: 0, low: 0, info: 0 }, failureType: 'parse-error' },
+        filePath,
+        status: "INCOMPLETE",
+        passed: false,
+        diagnostics: [],
+        checks: [
+            {
+                id: "mobile-config",
+                name: "Mobile platform configuration",
+                status: "INCOMPLETE",
+                required: true,
+                message,
+            },
+        ],
+        stats: {
+            totalLines,
+            blocksAnalyzed: 0,
+            rulesChecked: 6,
+            executionTimeMs: duration,
+            issuesCount: { critical: 0, high: 0, medium: 0, low: 0, info: 0 },
+            failureType: "parse-error",
+        },
         summary: `Verification Incomplete: mobile configuration could not be parsed (${message}).`,
     };
 }

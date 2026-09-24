@@ -1,4 +1,4 @@
-import { Diagnostic } from './types/verifier';
+import { Diagnostic } from "./types/verifier";
 export interface BaselineFile {
     version: 1;
     fingerprints: string[];
