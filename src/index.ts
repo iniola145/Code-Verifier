@@ -23,6 +23,7 @@ export * from './formatter/llm-formatter';
 export * from './formatter/sarif';
 export * from './engine';
 export * from './project-checks';
+export * from './project-ui-index';
 export * from './baseline';
 export * from './semantic-analysis';
 export * from './mobile-config';

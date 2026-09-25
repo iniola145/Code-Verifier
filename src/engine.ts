@@ -12,6 +12,7 @@ import { ProjectSummaryIndex } from './abstract-interpreter/project-summaries';
 import { diagnosticFingerprint } from './baseline';
 import { SemanticAnalysisIndex } from './semantic-analysis';
 import { ImportGraphIndex } from './unused-files';
+import { ProjectUiIndex } from './project-ui-index';
 import { SymbolTable } from './abstract-interpreter/symbols';
 import { REGISTERED_RULES, getRuleMetadata } from './rules/registry';
 import {
@@ -36,6 +37,7 @@ export interface VerifierOptions {
   projectRoot?: string;
   semanticAnalysisIndex?: SemanticAnalysisIndex;
   importGraphIndex?: ImportGraphIndex;
+  projectUiIndex?: ProjectUiIndex;
 }
 
 interface FunctionRoot {
@@ -145,6 +147,7 @@ export class CodeVerifier {
   private projectRoot?: string;
   private semanticAnalysisIndex?: SemanticAnalysisIndex;
   private importGraphIndex?: ImportGraphIndex;
+  private projectUiIndex?: ProjectUiIndex;
 
   constructor(options?: VerifierOptions) {
     this.rules = options?.rules || REGISTERED_RULES;
@@ -157,6 +160,7 @@ export class CodeVerifier {
     this.projectRoot = options?.projectRoot;
     this.semanticAnalysisIndex = options?.semanticAnalysisIndex;
     this.importGraphIndex = options?.importGraphIndex;
+    this.projectUiIndex = options?.projectUiIndex;
   }
 
   /**
@@ -184,6 +188,8 @@ export class CodeVerifier {
     const cfgs: CFG[] = [];
     const functionSummaries = this.projectSummaryIndex?.summariesForFile(ast, filePath) ?? new Map();
     const projectFunctionBehaviors = this.projectSummaryIndex?.behaviorsForFile(ast, filePath) ?? new Map();
+    const projectSchemaTypes = this.projectUiIndex?.schemaTypesForFile(ast, filePath) ?? new Map();
+    const projectStyleObjects = this.projectUiIndex?.styleObjectsForFile(ast, filePath) ?? new Map();
     for (const [name, summary] of buildFunctionSummaries(ast, functionSummaries)) functionSummaries.set(name, summary);
     let truncatedCount = 0;
     let abstractAnalysisIncomplete = false;
@@ -261,6 +267,9 @@ export class CodeVerifier {
       symbols,
       functionSummaries,
       projectFunctionBehaviors,
+      projectSchemaTypes,
+      projectStyleObjects,
+      projectUiIndex: this.projectUiIndex,
       projectRoot: this.projectRoot,
       report: (d) => {
         diagnostics.push({

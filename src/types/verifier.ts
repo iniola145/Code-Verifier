@@ -1,6 +1,7 @@
 import type { SymbolTable } from "../abstract-interpreter/symbols";
 import type { FunctionSummary } from "../abstract-interpreter/function-summaries";
 import type { ProjectFunctionBehavior } from "../abstract-interpreter/project-summaries";
+import type { ProjectUiIndex, SchemaTypeFact, StyleObjectFact } from "../project-ui-index";
 
 export type DiagnosticCategory =
   | "SECURITY"
@@ -211,6 +212,9 @@ export interface RuleContext {
   functionSummaries: Map<string, FunctionSummary>;
   /** Behaviors proven for functions imported from another analyzed project file. */
   projectFunctionBehaviors: Map<string, ProjectFunctionBehavior>;
+  projectSchemaTypes: Map<string, SchemaTypeFact>;
+  projectStyleObjects: Map<string, StyleObjectFact>;
+  projectUiIndex?: ProjectUiIndex;
   /** Project root, when known — lets path-convention rules (e.g. Expo Router) resolve files precisely. */
   projectRoot?: string;
   report: (diagnostic: Omit<Diagnostic, "filePath">) => void;
