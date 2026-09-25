@@ -1911,6 +1911,16 @@ async function runTests() {
     "LOGIC-007",
     "Number.isNaN validation is clean",
   );
+  await expectFinding(
+    `function Price() { const [amount, setAmount] = useState<number | null>(10); useEffect(() => setAmount(null), []); return amount.toFixed(2); }`,
+    "REACT-021",
+    "Nullable state that can change after the initial render is guarded",
+  );
+  await expectNoFinding(
+    `function Price() { const [amount] = useState<number | null>(10); if (amount == null) return null; return amount.toFixed(2); }`,
+    "REACT-021",
+    "Render-time guard protects nullable state",
+  );
 
   console.log("— Hygiene Rules");
   await expectFinding(

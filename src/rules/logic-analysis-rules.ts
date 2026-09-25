@@ -10,13 +10,15 @@ function emit(
   message: string,
   explanation: string,
   remediation: string,
+  category: "CORRECTNESS" | "REACT_HOOKS" = "CORRECTNESS",
+  severity: "HIGH" | "MEDIUM" = "HIGH",
 ): void {
   const loc = nodeToLocation(node);
   ctx.report({
     id: `${ctx.filePath}:${loc.start.line}:${loc.start.column}:${ruleId}`,
     ruleId,
-    category: "CORRECTNESS",
-    severity: "HIGH",
+    category,
+    severity,
     message,
     explanation,
     loc,
@@ -243,9 +245,61 @@ export const InvalidNaNComparisonRule: VerificationRule = {
   },
 };
 
+function isNullableStateWithNonNullInitial(path: NodePath<t.Identifier>): boolean {
+  const binding = path.scope.getBinding(path.node.name);
+  if (!binding?.path.isVariableDeclarator() || !t.isArrayPattern(binding.path.node.id))
+    return false;
+  const init = binding.path.node.init;
+  if (!t.isCallExpression(init)) return false;
+  const callee = init.callee;
+  const isUseState =
+    t.isIdentifier(callee, { name: "useState" }) ||
+    (t.isMemberExpression(callee) && t.isIdentifier(callee.property, { name: "useState" }));
+  const params = init.typeParameters ?? init.typeArguments;
+  const initial = init.arguments[0];
+  return !!(
+    isUseState &&
+    params &&
+    typeContainsNullish(params) &&
+    initial &&
+    !t.isNullLiteral(initial) &&
+    !t.isIdentifier(initial, { name: "undefined" })
+  );
+}
+
+export const NullableStateLifecycleRule: VerificationRule = {
+  id: "REACT-021",
+  name: "Nullable State Lifecycle Dereference",
+  description:
+    "Detects state declared nullable but dereferenced as if its non-null initial value persisted across renders.",
+  category: "REACT_HOOKS",
+  defaultSeverity: "MEDIUM",
+  check(ctx) {
+    traverse(ctx.ast, {
+      MemberExpression(path) {
+        if (path.node.optional || !t.isIdentifier(path.node.object)) return;
+        const object = path.get("object");
+        if (!object.isIdentifier()) return;
+        if (!isNullableStateWithNonNullInitial(object) || isNullishGuarded(object)) return;
+        emit(
+          ctx,
+          path.node,
+          "REACT-021",
+          `Nullable state '${object.node.name}' is dereferenced without a render-time guard.`,
+          "A later state update can replace the non-null initial value with null or undefined on a subsequent render.",
+          `Guard '${object.node.name}' in the render that uses it, use optional chaining, or make the state type non-nullable.`,
+          "REACT_HOOKS",
+          "MEDIUM",
+        );
+      },
+    });
+  },
+};
+
 export const LOGIC_ANALYSIS_RULES: VerificationRule[] = [
   NullableArithmeticRule,
   DefiniteZeroDivisionRule,
   UncheckedNumericParseRule,
   InvalidNaNComparisonRule,
+  NullableStateLifecycleRule,
 ];

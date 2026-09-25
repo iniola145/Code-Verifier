@@ -513,6 +513,12 @@ const METADATA: Record<string, MetadataFields> = {
     documentationUrl:
       "https://github.com/ArnaudBarre/eslint-plugin-react-refresh",
   },
+  "REACT-021": {
+    confidence: "HIGH",
+    requirements: ["AST", "TYPE_INFORMATION"],
+    frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+    documentationUrl: "https://react.dev/reference/react/useState",
+  },
 };
 
 function metadataFor(rule: VerificationRule): RuleMetadata {
