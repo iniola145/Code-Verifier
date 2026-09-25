@@ -535,6 +535,42 @@ export const UncheckedFetchResponseRule: VerificationRule = {
   },
 };
 
+export const LeakedRequestTimeoutRule: VerificationRule = {
+  id: "SERVICE-002",
+  name: "Leaked Request Timeout",
+  description: "Detects abort timeouts around fetch requests that are never cleared.",
+  category: "CORRECTNESS",
+  defaultSeverity: "MEDIUM",
+  check(ctx) {
+    traverse(ctx.ast, {
+      Function(path) {
+        let timeout: t.CallExpression | null = null;
+        let hasFetch = false;
+        let clearsTimeout = false;
+        path.traverse({
+          Function(inner) { if (inner !== path) inner.skip(); },
+          CallExpression(call) {
+            if (t.isIdentifier(call.node.callee, { name: "fetch" })) hasFetch = true;
+            if (t.isIdentifier(call.node.callee, { name: "clearTimeout" })) clearsTimeout = true;
+            if (!t.isIdentifier(call.node.callee, { name: "setTimeout" })) return;
+            const callback = call.get("arguments.0");
+            if (!callback.isArrowFunctionExpression() && !callback.isFunctionExpression()) return;
+            let aborts = false;
+            callback.traverse({ CallExpression(inner) {
+              if (t.isMemberExpression(inner.node.callee) && t.isIdentifier(inner.node.callee.property, { name: "abort" })) aborts = true;
+            }});
+            if (aborts) timeout = call.node;
+          },
+        });
+        if (!timeout || !hasFetch || clearsTimeout) return;
+        emit(ctx, timeout, "SERVICE-002", "A request abort timeout is never cleared.",
+          "The timer remains live after an early success or failure and can retain closures, fire needlessly, and interfere with reused cancellation state.",
+          "Store the timeout handle and clear it in a finally block covering the fetch operation.", "CORRECTNESS", "MEDIUM");
+      },
+    });
+  },
+};
+
 export const LOGIC_ANALYSIS_RULES: VerificationRule[] = [
   NullableArithmeticRule,
   DefiniteZeroDivisionRule,
@@ -549,4 +585,5 @@ export const LOGIC_ANALYSIS_RULES: VerificationRule[] = [
   EffectTimerStateUpdateRule,
   StaleAsyncStateUpdateRule,
   UncheckedFetchResponseRule,
+  LeakedRequestTimeoutRule,
 ];

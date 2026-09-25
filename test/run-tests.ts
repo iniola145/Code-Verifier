@@ -2001,6 +2001,16 @@ async function runTests() {
     "SERVICE-001",
     "Fetch response checked before body consumption is clean",
   );
+  await expectFinding(
+    `export async function load() { const controller = new AbortController(); setTimeout(() => controller.abort(), 1000); return fetch('/api', { signal: controller.signal }); }`,
+    "SERVICE-002",
+    "Uncleared request abort timeout is flagged",
+  );
+  await expectNoFinding(
+    `export async function load() { const controller = new AbortController(); const id = setTimeout(() => controller.abort(), 1000); try { return await fetch('/api', { signal: controller.signal }); } finally { clearTimeout(id); } }`,
+    "SERVICE-002",
+    "Request abort timeout cleared in finally is clean",
+  );
 
   console.log("— Hygiene Rules");
   await expectFinding(
