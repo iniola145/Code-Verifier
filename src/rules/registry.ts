@@ -545,6 +545,12 @@ const METADATA: Record<string, MetadataFields> = {
     frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
     documentationUrl: "https://react.dev/reference/react/useEffect#fetching-data-with-effects",
   },
+  "REACT-023": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+    documentationUrl: "https://react.dev/reference/react/useEffect",
+  },
 };
 
 function metadataFor(rule: VerificationRule): RuleMetadata {

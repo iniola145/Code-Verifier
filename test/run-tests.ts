@@ -1971,6 +1971,16 @@ async function runTests() {
     "REACT-022",
     "Effect request with cancellation cleanup is clean",
   );
+  await expectFinding(
+    `function Toast() { const [open, setOpen] = useState(true); useEffect(() => { setTimeout(() => setOpen(false), 1000); }, []); return null; }`,
+    "REACT-023",
+    "Delayed state update without timeout cleanup is flagged",
+  );
+  await expectNoFinding(
+    `function Toast() { const [open, setOpen] = useState(true); useEffect(() => { const id = setTimeout(() => setOpen(false), 1000); return () => clearTimeout(id); }, []); return null; }`,
+    "REACT-023",
+    "Delayed state update with timeout cleanup is clean",
+  );
 
   console.log("— Hygiene Rules");
   await expectFinding(

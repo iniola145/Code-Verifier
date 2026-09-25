@@ -428,6 +428,42 @@ export const EffectRequestRaceRule: VerificationRule = {
   },
 };
 
+export const EffectTimerStateUpdateRule: VerificationRule = {
+  id: "REACT-023",
+  name: "Uncancelled Delayed State Update",
+  description: "Detects effect timeouts that update state without clearing the timeout.",
+  category: "REACT_HOOKS",
+  defaultSeverity: "MEDIUM",
+  check(ctx) {
+    traverse(ctx.ast, {
+      CallExpression(path) {
+        if (!isHookCall(path.node, "useEffect")) return;
+        const callback = path.get("arguments.0");
+        if ((!callback.isArrowFunctionExpression() && !callback.isFunctionExpression()) || !t.isBlockStatement(callback.node.body)) return;
+        let riskyTimer: t.CallExpression | null = null;
+        let clearsTimer = false;
+        callback.traverse({
+          CallExpression(inner) {
+            if (t.isIdentifier(inner.node.callee, { name: "clearTimeout" })) clearsTimer = true;
+            if (!t.isIdentifier(inner.node.callee, { name: "setTimeout" })) return;
+            const timerCallback = inner.get("arguments.0");
+            if (!timerCallback.isFunctionExpression() && !timerCallback.isArrowFunctionExpression()) return;
+            let updatesState = false;
+            timerCallback.traverse({ CallExpression(call) {
+              if (t.isIdentifier(call.node.callee) && /^set[A-Z]/.test(call.node.callee.name)) updatesState = true;
+            }});
+            if (updatesState) riskyTimer = inner.node;
+          },
+        });
+        if (!riskyTimer || clearsTimer) return;
+        emit(ctx, riskyTimer, "REACT-023", "An effect schedules a delayed state update without clearing its timeout.",
+          "The timeout can fire after unmount or after dependencies change, applying stale state to the wrong lifecycle instance.",
+          "Store the timeout handle and return cleanup that calls clearTimeout(handle).", "REACT_HOOKS", "MEDIUM");
+      },
+    });
+  },
+};
+
 export const LOGIC_ANALYSIS_RULES: VerificationRule[] = [
   NullableArithmeticRule,
   DefiniteZeroDivisionRule,
@@ -439,4 +475,5 @@ export const LOGIC_ANALYSIS_RULES: VerificationRule[] = [
   EmptyReduceRule,
   AccidentalSwitchFallthroughRule,
   EffectRequestRaceRule,
+  EffectTimerStateUpdateRule,
 ];
