@@ -1981,6 +1981,16 @@ async function runTests() {
     "REACT-023",
     "Delayed state update with timeout cleanup is clean",
   );
+  await expectFinding(
+    `function Counter() { const [count, setCount] = useState(0); const later = async () => { await save(); setCount(count + 1); }; return null; }`,
+    "REACT-024",
+    "Async update derived from captured state is flagged",
+  );
+  await expectNoFinding(
+    `function Counter() { const [count, setCount] = useState(0); const later = async () => { await save(); setCount(current => current + 1); }; return null; }`,
+    "REACT-024",
+    "Functional async state update is clean",
+  );
 
   console.log("— Hygiene Rules");
   await expectFinding(

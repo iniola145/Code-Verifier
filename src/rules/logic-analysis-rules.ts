@@ -418,6 +418,9 @@ export const EffectRequestRaceRule: VerificationRule = {
           ReturnStatement(inner) {
             if (t.isFunctionExpression(inner.node.argument) || t.isArrowFunctionExpression(inner.node.argument)) hasCleanup = true;
           },
+          Identifier(inner) {
+            if (/^set[A-Z]/.test(inner.node.name) && inner.isReferencedIdentifier()) hasSetter = true;
+          },
         });
         if (!hasFetch || !hasSetter || hasCleanup) return;
         emit(ctx, path.node, "REACT-022", "An effect fetches data and updates state without cancellation cleanup.",
@@ -464,6 +467,43 @@ export const EffectTimerStateUpdateRule: VerificationRule = {
   },
 };
 
+export const StaleAsyncStateUpdateRule: VerificationRule = {
+  id: "REACT-024",
+  name: "Stale Async State Update",
+  description: "Detects delayed state updates computed from a captured render value.",
+  category: "REACT_HOOKS",
+  defaultSeverity: "MEDIUM",
+  check(ctx) {
+    const setters = new Map<string, string>();
+    traverse(ctx.ast, {
+      VariableDeclarator(path) {
+        if (!t.isArrayPattern(path.node.id) || !t.isCallExpression(path.node.init) || !isHookCall(path.node.init, "useState")) return;
+        const [state, setter] = path.node.id.elements;
+        if (t.isIdentifier(state) && t.isIdentifier(setter)) setters.set(setter.name, state.name);
+      },
+    });
+    traverse(ctx.ast, {
+      CallExpression(path) {
+        if (!t.isIdentifier(path.node.callee)) return;
+        const stateName = setters.get(path.node.callee.name);
+        const argument = path.node.arguments[0];
+        if (!stateName || !t.isExpression(argument) || t.isFunction(argument)) return;
+        let readsState = false;
+        path.get("arguments.0").traverse({ Identifier(id) { if (id.node.name === stateName) readsState = true; } });
+        if (!readsState) return;
+        const delayed = path.findParent((parent) =>
+          (parent.isFunction() && parent.node.async) ||
+          (parent.isCallExpression() && t.isIdentifier(parent.node.callee, { name: "setTimeout" })),
+        );
+        if (!delayed) return;
+        emit(ctx, path.node, "REACT-024", `State setter '${path.node.callee.name}' uses captured '${stateName}' in delayed work.`,
+          "Multiple delayed updates can all read the same old render value, losing increments or overwriting newer state.",
+          `Use the functional form ${path.node.callee.name}(current => ...) so React supplies the latest state.`, "REACT_HOOKS", "MEDIUM");
+      },
+    });
+  },
+};
+
 export const LOGIC_ANALYSIS_RULES: VerificationRule[] = [
   NullableArithmeticRule,
   DefiniteZeroDivisionRule,
@@ -476,4 +516,5 @@ export const LOGIC_ANALYSIS_RULES: VerificationRule[] = [
   AccidentalSwitchFallthroughRule,
   EffectRequestRaceRule,
   EffectTimerStateUpdateRule,
+  StaleAsyncStateUpdateRule,
 ];

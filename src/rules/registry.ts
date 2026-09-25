@@ -551,6 +551,12 @@ const METADATA: Record<string, MetadataFields> = {
     frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
     documentationUrl: "https://react.dev/reference/react/useEffect",
   },
+  "REACT-024": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+    documentationUrl: "https://react.dev/reference/react/useState#updating-state-based-on-the-previous-state",
+  },
 };
 
 function metadataFor(rule: VerificationRule): RuleMetadata {
