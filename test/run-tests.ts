@@ -2293,6 +2293,8 @@ async function runTests() {
     assert(drawer.diagnostics.some((d) => d.ruleId === "FORM-003"), "Silent form validation return is flagged");
     assert(drawer.diagnostics.some((d) => d.ruleId === "FORM-004"), "Missing field-error propagation is flagged");
     assert(drawer.diagnostics.some((d) => d.ruleId === "FORM-005"), "Closing immediately after submission is flagged");
+    const validDrawer = await projectVerifier.verifyFile(path.join(fixtureRoot, "BranchDrawerValid.tsx"));
+    assert(!validDrawer.diagnostics.some((d) => /^FORM-00[1-5]$/.test(d.ruleId)), "Schema validation, error propagation, and awaited submit remain clean");
 
     const styled = await projectVerifier.verifyFile(path.join(fixtureRoot, "StyledCard.tsx"));
     assert(styled.diagnostics.some((d) => d.ruleId === "STYLE-001" && /missing/.test(d.message)), "Undefined TypeScript style key is flagged");
@@ -2303,6 +2305,16 @@ async function runTests() {
     assert(css.diagnostics.some((d) => d.ruleId === "STYLE-001" && /missing/.test(d.message)), "Undefined CSS-module class is flagged");
     assert(css.diagnostics.some((d) => d.ruleId === "STYLE-002" && /obsolete/.test(d.message)), "Unused CSS-module class is flagged");
   }
+  await expectNoFinding(
+    `function Upload() { const [files] = useState([]); const handleSubmit = () => { if (files.length === 0) return; upload(files); }; return <button disabled={files.length === 0} onClick={handleSubmit}>Upload</button>; }`,
+    "FORM-003",
+    "Disabled submit control explains an empty-input guard",
+  );
+  await expectNoFinding(
+    `function useSubmit() { const handleSubmit = () => mutate(undefined, { onError(error) { if (isTerminal(error.message)) return; setError(error.message); } }); return handleSubmit; }`,
+    "FORM-003",
+    "Nested terminal-error callback is not mistaken for silent form validation",
+  );
 
   console.log("— Hygiene Rules");
   await expectFinding(

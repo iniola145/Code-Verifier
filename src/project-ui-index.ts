@@ -275,12 +275,12 @@ function collectStyleObjects(ast: t.File, filePath: string): Map<string, StyleOb
     if (!t.isVariableDeclaration(declaration)) continue;
     for (const item of declaration.declarations) {
       if (!t.isIdentifier(item.id)) continue;
-      const isNativeSheet = t.isCallExpression(item.init) && t.isMemberExpression(item.init.callee) && t.isIdentifier(item.init.callee.object, { name: "StyleSheet" }) &&
-        t.isIdentifier(item.init.callee.property, { name: "create" }) && t.isObjectExpression(item.init.arguments[0]);
+      const nativeObject = t.isCallExpression(item.init) && t.isMemberExpression(item.init.callee) && t.isIdentifier(item.init.callee.object, { name: "StyleSheet" }) &&
+        t.isIdentifier(item.init.callee.property, { name: "create" }) && t.isObjectExpression(item.init.arguments[0]) ? item.init.arguments[0] : null;
       const plainObject = t.isObjectExpression(item.init) ? item.init : null;
       const isStyleMap = plainObject && plainObject.properties.length > 0 && plainObject.properties.every((property) =>
         (t.isObjectProperty(property) && (t.isObjectExpression(property.value) || t.isFunction(property.value))) || t.isObjectMethod(property));
-      const object = isNativeSheet ? item.init.arguments[0] as t.ObjectExpression : isStyleMap ? plainObject : null;
+      const object = nativeObject ?? (isStyleMap ? plainObject : null);
       if (!object || !/(?:styles?|classes)$/i.test(item.id.name)) continue;
       const keys = object.properties.flatMap((property) => t.isObjectProperty(property) || t.isObjectMethod(property)
         ? [t.isIdentifier(property.key) ? property.key.name : t.isStringLiteral(property.key) ? property.key.value : ""].filter(Boolean) : []);

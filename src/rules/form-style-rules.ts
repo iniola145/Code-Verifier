@@ -87,11 +87,16 @@ export const SilentFormFailureRule: VerificationRule = {
         if (!/(?:save|submit|create|update|apply|confirm)/i.test(functionName(path))) return;
         path.traverse({
           IfStatement(inner) {
+            if (inner.getFunctionParent() !== path) return;
             const consequent = inner.node.consequent;
             const silentlyReturns = t.isReturnStatement(consequent) || t.isBlockStatement(consequent) && consequent.body.length === 1 && t.isReturnStatement(consequent.body[0]);
             if (!silentlyReturns) return;
             const test = inner.get("test").toString();
             if (!/(?:trim|length|safeParse|isValid|errors?|required)/i.test(test)) return;
+            const identifiers = new Set<string>();
+            inner.get("test").traverse({ Identifier(identifier) { if (identifier.isReferencedIdentifier()) identifiers.add(identifier.node.name); } });
+            const componentText = path.getFunctionParent()?.toString() ?? "";
+            if ([...identifiers].some((identifier) => new RegExp(`disabled\\s*=\\s*\\{[^}]*\\b${identifier}\\b`).test(componentText))) return;
             const body = path.toString();
             if (/(?:setErrors?|toast\.|alert\s*\(|setFieldError|focus\s*\()/i.test(body.slice(0, body.indexOf(inner.toString()) + inner.toString().length))) return;
             emit(ctx, inner.node, "FORM-003", "Invalid form input returns silently without user feedback.",
@@ -133,12 +138,12 @@ export const PrematureFormCloseRule: VerificationRule = {
     traverse(ctx.ast, {
       Function(path) {
         if (!/(?:save|submit|create|update|apply|confirm)/i.test(functionName(path))) return;
-        const calls: Array<{ name: string; node: t.CallExpression }> = [];
-        path.traverse({ CallExpression(call) { if (t.isIdentifier(call.node.callee)) calls.push({ name: call.node.callee.name, node: call.node }); } });
+        const calls: Array<{ name: string; path: NodePath<t.CallExpression> }> = [];
+        path.traverse({ CallExpression(call) { if (call.getFunctionParent() === path && t.isIdentifier(call.node.callee)) calls.push({ name: call.node.callee.name, path: call }); } });
         const submit = calls.find((call) => /^(?:onCreate|onUpdate|onSave|onSubmit|mutateAsync?)$/.test(call.name));
-        const close = calls.find((call) => /^(?:onClose|closeModal|dismiss)$/.test(call.name) && (call.node.start ?? 0) > (submit?.node.end ?? Infinity));
-        if (!submit || !close || t.isAwaitExpression((path.scope.getBinding(submit.name)?.path.parentPath?.node as any))) return;
-        emit(ctx, close.node, "FORM-005", "Form closes immediately after an unawaited submission callback.",
+        const close = calls.find((call) => /^(?:onClose|closeModal|dismiss)$/.test(call.name) && (call.path.node.start ?? 0) > (submit?.path.node.end ?? Infinity));
+        if (!submit || !close || submit.path.parentPath.isAwaitExpression() || submit.path.parentPath.isReturnStatement()) return;
+        emit(ctx, close.path.node, "FORM-005", "Form closes immediately after an unawaited submission callback.",
           "If persistence fails or validation is rejected downstream, user input disappears and the UI can falsely imply success.",
           "Await a success result before closing, or let the mutation success callback own dismissal.", "LOW");
       },
