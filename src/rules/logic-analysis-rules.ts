@@ -178,7 +178,46 @@ export const DefiniteZeroDivisionRule: VerificationRule = {
   },
 };
 
+function isUncheckedNumericParse(node: t.Node): boolean {
+  if (!t.isCallExpression(node)) return false;
+  const callee = node.callee;
+  return (
+    (t.isIdentifier(callee) && ["parseInt", "parseFloat", "Number"].includes(callee.name)) ||
+    (t.isMemberExpression(callee) &&
+      t.isIdentifier(callee.object, { name: "Number" }) &&
+      t.isIdentifier(callee.property) &&
+      ["parseInt", "parseFloat"].includes(callee.property.name))
+  );
+}
+
+export const UncheckedNumericParseRule: VerificationRule = {
+  id: "LOGIC-006",
+  name: "Unchecked Numeric Parse",
+  description: "Detects numeric parsing used directly in arithmetic without a NaN fallback.",
+  category: "CORRECTNESS",
+  defaultSeverity: "HIGH",
+  check(ctx) {
+    traverse(ctx.ast, {
+      BinaryExpression(path) {
+        if (!["+", "-", "*", "/", "%", "**"].includes(path.node.operator)) return;
+        for (const operand of [path.node.left, path.node.right]) {
+          if (!isUncheckedNumericParse(operand)) continue;
+          emit(
+            ctx,
+            operand,
+            "LOGIC-006",
+            "A parsed number is used in arithmetic without validating NaN.",
+            "Numeric parsing can return NaN for empty, malformed, or partially validated input, and NaN silently propagates through calculations.",
+            "Validate the parsed result with Number.isFinite/Number.isNaN, or provide an explicit fallback before arithmetic.",
+          );
+        }
+      },
+    });
+  },
+};
+
 export const LOGIC_ANALYSIS_RULES: VerificationRule[] = [
   NullableArithmeticRule,
   DefiniteZeroDivisionRule,
+  UncheckedNumericParseRule,
 ];

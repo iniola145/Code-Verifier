@@ -1891,6 +1891,16 @@ async function runTests() {
     "LOGIC-005",
     "Guarded dynamic division is clean",
   );
+  await expectFinding(
+    `export const cents = (raw: string) => parseInt(raw, 10) * 100;`,
+    "LOGIC-006",
+    "Unchecked parsed number used in arithmetic is flagged",
+  );
+  await expectNoFinding(
+    `export const cents = (raw: string) => (Number.parseInt(raw, 10) || 0) * 100;`,
+    "LOGIC-006",
+    "Parsed number with explicit fallback is clean",
+  );
 
   console.log("— Hygiene Rules");
   await expectFinding(
