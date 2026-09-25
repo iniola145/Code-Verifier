@@ -316,6 +316,27 @@ const METADATA: Record<string, MetadataFields> = {
     requirements: ["AST", "PROJECT_CONTEXT"],
     frameworks: ["TYPESCRIPT", "REACT", "WEB", "REACT_NATIVE", "EXPO"],
   },
+  "FORM-001": {
+    confidence: "HIGH", requirements: ["AST", "PROJECT_CONTEXT"], frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+  },
+  "FORM-002": {
+    confidence: "HIGH", requirements: ["AST", "PROJECT_CONTEXT"], frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+  },
+  "FORM-003": {
+    confidence: "HIGH", requirements: ["AST"], frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+  },
+  "FORM-004": {
+    confidence: "MEDIUM", requirements: ["AST", "PROJECT_CONTEXT"], frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+  },
+  "FORM-005": {
+    confidence: "MEDIUM", requirements: ["AST"], frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+  },
+  "STYLE-001": {
+    confidence: "HIGH", requirements: ["AST", "PROJECT_CONTEXT"], frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
+  },
+  "STYLE-002": {
+    confidence: "HIGH", requirements: ["AST", "PROJECT_CONTEXT"], frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
+  },
   "ASYNC-001": {
     confidence: "HIGH",
     requirements: ["AST"],

@@ -1,0 +1,3 @@
+.card { display: block; }
+.label { font-weight: bold; }
+.obsolete { opacity: 0; }

@@ -77,7 +77,7 @@ export class ProjectUiIndex {
   unusedCssClassesForFile(filePath: string): Array<{ cssFile: string; className: string }> {
     const result: Array<{ cssFile: string; className: string }> = [];
     for (const fact of this.css.values()) {
-      if (fact.ownerFile !== path.resolve(filePath)) continue;
+      if (fact.ownerFile !== path.resolve(filePath) || !/\.module\.css$/i.test(fact.filePath)) continue;
       for (const className of fact.classes) if (!fact.usedClasses.has(className)) result.push({ cssFile: fact.filePath, className });
     }
     return result;
@@ -174,6 +174,7 @@ export class ProjectUiIndex {
       const importedStyles = this.styleObjectsForFile(module.ast, filePath);
       const localStyles = this.definedStyleObjectsForFile(filePath);
       const available = new Map([...localStyles, ...importedStyles]);
+      const cssFacts = thisCssFacts(module, this.css);
       traverse(module.ast, {
         MemberExpression(path) {
           if (!t.isIdentifier(path.node.object)) return;
@@ -182,10 +183,11 @@ export class ProjectUiIndex {
           const key = !path.node.computed && t.isIdentifier(path.node.property) ? path.node.property.name :
             path.node.computed && t.isStringLiteral(path.node.property) ? path.node.property.value : null;
           if (key) fact.usedKeys.add(key);
+          else if (path.node.computed) fact.keys.forEach((item) => fact.usedKeys.add(item));
         },
         JSXAttribute(path) {
           if (!t.isJSXIdentifier(path.node.name, { name: "className" }) || !t.isStringLiteral(path.node.value)) return;
-          for (const name of path.node.value.value.split(/\s+/).filter(Boolean)) for (const css of thisCssFacts(module, this.css)) css.usedClasses.add(name);
+          for (const name of path.node.value.value.split(/\s+/).filter(Boolean)) for (const css of cssFacts) css.usedClasses.add(name);
         },
       });
     }
@@ -273,9 +275,12 @@ function collectStyleObjects(ast: t.File, filePath: string): Map<string, StyleOb
     if (!t.isVariableDeclaration(declaration)) continue;
     for (const item of declaration.declarations) {
       if (!t.isIdentifier(item.id)) continue;
-      const object = t.isObjectExpression(item.init) ? item.init :
-        t.isCallExpression(item.init) && t.isMemberExpression(item.init.callee) && t.isIdentifier(item.init.callee.object, { name: "StyleSheet" }) &&
-          t.isIdentifier(item.init.callee.property, { name: "create" }) && t.isObjectExpression(item.init.arguments[0]) ? item.init.arguments[0] : null;
+      const isNativeSheet = t.isCallExpression(item.init) && t.isMemberExpression(item.init.callee) && t.isIdentifier(item.init.callee.object, { name: "StyleSheet" }) &&
+        t.isIdentifier(item.init.callee.property, { name: "create" }) && t.isObjectExpression(item.init.arguments[0]);
+      const plainObject = t.isObjectExpression(item.init) ? item.init : null;
+      const isStyleMap = plainObject && plainObject.properties.length > 0 && plainObject.properties.every((property) =>
+        (t.isObjectProperty(property) && (t.isObjectExpression(property.value) || t.isFunction(property.value))) || t.isObjectMethod(property));
+      const object = isNativeSheet ? item.init.arguments[0] as t.ObjectExpression : isStyleMap ? plainObject : null;
       if (!object || !/(?:styles?|classes)$/i.test(item.id.name)) continue;
       const keys = object.properties.flatMap((property) => t.isObjectProperty(property) || t.isObjectMethod(property)
         ? [t.isIdentifier(property.key) ? property.key.name : t.isStringLiteral(property.key) ? property.key.value : ""].filter(Boolean) : []);

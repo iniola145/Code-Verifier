@@ -27,6 +27,7 @@ import * as fs from "fs";
 import * as os from "os";
 import { SemanticAnalysisIndex } from "../src/semantic-analysis";
 import { ImportGraphIndex } from "../src/unused-files";
+import { ProjectUiIndex } from "../src/project-ui-index";
 
 /** Recursively collects source files under dir, skipping node_modules/dist/.git. */
 function expandAllFiles(dir: string): string[] {
@@ -2279,6 +2280,28 @@ async function runTests() {
     const projectVerifier = new CodeVerifier({ projectSummaryIndex: ProjectSummaryIndex.fromFiles([helper, consumer]) });
     const result = await projectVerifier.verifyFile(consumer);
     assert(!result.diagnostics.some((d) => d.ruleId === "RACE-009"), "Imported single-flight refresh helper is recognized across files");
+  }
+
+  console.log("— Form Contracts and Style Consistency");
+  {
+    const fixtureRoot = path.resolve(__dirname, "fixtures/ui-project");
+    const files = expandAllFiles(fixtureRoot);
+    const projectVerifier = new CodeVerifier({ projectUiIndex: ProjectUiIndex.fromFiles(files), projectRoot: fixtureRoot });
+    const drawer = await projectVerifier.verifyFile(path.join(fixtureRoot, "BranchDrawer.tsx"));
+    assert(drawer.diagnostics.some((d) => d.ruleId === "FORM-001"), "Schema-derived form submitted without safeParse is flagged");
+    assert(drawer.diagnostics.some((d) => d.ruleId === "FORM-002" && /address/.test(d.message) && /area/.test(d.message)), "Partial manual validation names omitted required fields");
+    assert(drawer.diagnostics.some((d) => d.ruleId === "FORM-003"), "Silent form validation return is flagged");
+    assert(drawer.diagnostics.some((d) => d.ruleId === "FORM-004"), "Missing field-error propagation is flagged");
+    assert(drawer.diagnostics.some((d) => d.ruleId === "FORM-005"), "Closing immediately after submission is flagged");
+
+    const styled = await projectVerifier.verifyFile(path.join(fixtureRoot, "StyledCard.tsx"));
+    assert(styled.diagnostics.some((d) => d.ruleId === "STYLE-001" && /missing/.test(d.message)), "Undefined TypeScript style key is flagged");
+    const styleDefinition = await projectVerifier.verifyFile(path.join(fixtureRoot, "cardStyles.ts"));
+    assert(styleDefinition.diagnostics.some((d) => d.ruleId === "STYLE-002" && /obsolete/.test(d.message)), "Unused TypeScript style key is flagged");
+
+    const css = await projectVerifier.verifyFile(path.join(fixtureRoot, "CssCard.tsx"));
+    assert(css.diagnostics.some((d) => d.ruleId === "STYLE-001" && /missing/.test(d.message)), "Undefined CSS-module class is flagged");
+    assert(css.diagnostics.some((d) => d.ruleId === "STYLE-002" && /obsolete/.test(d.message)), "Unused CSS-module class is flagged");
   }
 
   console.log("— Hygiene Rules");
