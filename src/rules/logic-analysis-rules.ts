@@ -296,10 +296,34 @@ export const NullableStateLifecycleRule: VerificationRule = {
   },
 };
 
+function isMethodCall(node: t.Node, name: string): node is t.CallExpression {
+  return t.isCallExpression(node) && t.isMemberExpression(node.callee) &&
+    t.isIdentifier(node.callee.property, { name });
+}
+
+export const UnsafeFindResultRule: VerificationRule = {
+  id: "LOGIC-008",
+  name: "Unsafe Array Find Result",
+  description: "Detects immediate property access on Array.find results that may be undefined.",
+  category: "CORRECTNESS",
+  defaultSeverity: "HIGH",
+  check(ctx) {
+    traverse(ctx.ast, {
+      MemberExpression(path) {
+        if (path.node.optional || !isMethodCall(path.node.object, "find")) return;
+        emit(ctx, path.node, "LOGIC-008", "A property is read directly from an Array.find result.",
+          "Array.find returns undefined when no element matches, so the property access can fail on valid empty or unmatched input.",
+          "Store and guard the result, use optional chaining, or provide an explicit fallback.");
+      },
+    });
+  },
+};
+
 export const LOGIC_ANALYSIS_RULES: VerificationRule[] = [
   NullableArithmeticRule,
   DefiniteZeroDivisionRule,
   UncheckedNumericParseRule,
   InvalidNaNComparisonRule,
   NullableStateLifecycleRule,
+  UnsafeFindResultRule,
 ];

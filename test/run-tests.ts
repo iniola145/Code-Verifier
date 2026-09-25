@@ -1921,6 +1921,16 @@ async function runTests() {
     "REACT-021",
     "Render-time guard protects nullable state",
   );
+  await expectFinding(
+    `export const name = (users: User[]) => users.find(u => u.active).name;`,
+    "LOGIC-008",
+    "Immediate dereference of Array.find result is flagged",
+  );
+  await expectNoFinding(
+    `export const name = (users: User[]) => users.find(u => u.active)?.name ?? "Unknown";`,
+    "LOGIC-008",
+    "Optional Array.find result access is clean",
+  );
 
   console.log("— Hygiene Rules");
   await expectFinding(
