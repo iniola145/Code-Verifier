@@ -212,9 +212,148 @@ export const UploadSizeValidationRule: VerificationRule = {
   },
 };
 
+function memberName(node: t.Expression | t.V8IntrinsicIdentifier): string | null {
+  if (!t.isMemberExpression(node) && !t.isOptionalMemberExpression(node)) return null;
+  if (!node.computed && t.isIdentifier(node.property)) return node.property.name;
+  if (node.computed && t.isStringLiteral(node.property)) return node.property.value;
+  return null;
+}
+
+export const RefreshSingleFlightRule: VerificationRule = {
+  id: "RACE-009",
+  name: "Uncoordinated Authentication Refresh",
+  description: "Detects 401 interceptors that can start one token refresh per failed request.",
+  category: "CORRECTNESS",
+  defaultSeverity: "MEDIUM",
+  check(ctx) {
+    if (!/(?:auth|api|client|interceptor)/i.test(ctx.filePath)) return;
+    traverse(ctx.ast, {
+      CallExpression(path) {
+        if (memberName(path.node.callee) !== "use") return;
+        const text = path.toString();
+        if (!/\b401\b/.test(text) || !/(?:refreshToken|refreshAccessToken|\/refresh\b|refresh\s*\()/i.test(text)) return;
+        if (/(?:refreshPromise|isRefreshing|failedQueue|refreshQueue|subscribers|singleFlight|mutex)/i.test(text)) return;
+        report(ctx, path.node, "RACE-009", "Concurrent 401 responses can start overlapping token refreshes.",
+          "Parallel API failures may rotate credentials multiple times, overwrite a newer token, or retry requests with an invalidated token.",
+          "Share one in-flight refresh promise, queue failed requests behind it, and clear the coordinator in finally.");
+      },
+    });
+  },
+};
+
+export const RetriedMutationIdempotencyRule: VerificationRule = {
+  id: "MUTATION-001",
+  name: "Retried Mutation Without Idempotency",
+  description: "Detects automatically retried write mutations without an idempotency key.",
+  category: "CORRECTNESS",
+  defaultSeverity: "MEDIUM",
+  check(ctx) {
+    traverse(ctx.ast, {
+      CallExpression(path) {
+        if (!(t.isIdentifier(path.node.callee, { name: "useMutation" }) || memberName(path.node.callee) === "useMutation")) return;
+        const options = path.node.arguments[0];
+        if (!t.isObjectExpression(options)) return;
+        const retry = propertyOf(options, "retry");
+        if (!retry || (t.isNumericLiteral(retry.value, { value: 0 })) || t.isBooleanLiteral(retry.value, { value: false })) return;
+        const text = path.toString();
+        if (!/\.(?:post|put|patch|delete)\s*\(/i.test(text)) return;
+        if (/(?:idempotency|requestId|operationId|mutationId)/i.test(text)) return;
+        report(ctx, retry, "MUTATION-001", "Automatically retried write mutation has no idempotency key.",
+          "A timeout can occur after the server commits the write. Retrying can then create duplicate payments, applications, messages, or records.",
+          "Attach a stable operation ID/idempotency key that is reused by every retry, or disable automatic retries for non-idempotent writes.");
+      },
+    });
+  },
+};
+
+export const InfiniteQueryPaginationRule: VerificationRule = {
+  id: "QUERY-002",
+  name: "Incomplete Infinite Query Pagination",
+  description: "Detects infinite queries that omit cursor progression or ignore pageParam.",
+  category: "CORRECTNESS",
+  defaultSeverity: "MEDIUM",
+  check(ctx) {
+    traverse(ctx.ast, {
+      CallExpression(path) {
+        if (!(t.isIdentifier(path.node.callee, { name: "useInfiniteQuery" }) || memberName(path.node.callee) === "useInfiniteQuery")) return;
+        const options = path.node.arguments[0];
+        if (!t.isObjectExpression(options)) return;
+        const next = propertyOf(options, "getNextPageParam");
+        const query = propertyOf(options, "queryFn");
+        if (!next) {
+          report(ctx, options, "QUERY-002", "Infinite query has no getNextPageParam cursor policy.",
+            "Pagination cannot reliably determine when to stop or which cursor follows the current page.",
+            "Provide getNextPageParam and return undefined when the server has no next page.");
+          return;
+        }
+        const optionsPath = path.get("arguments.0");
+        const queryPath = optionsPath.isObjectExpression()
+          ? optionsPath.get("properties").find((property) => property.node === query)
+          : undefined;
+        if (query && t.isFunction(query.value) && queryPath && !/\bpageParam\b/.test(queryPath.toString())) {
+          report(ctx, query, "QUERY-002", "Infinite query ignores pageParam and can repeatedly fetch the first page.",
+            "The cache may append duplicate records forever while the user believes they are loading subsequent pages.",
+            "Read pageParam in queryFn and send it as the server cursor or offset.");
+        }
+      },
+    });
+  },
+};
+
+export const OfflineReplayIdentityRule: VerificationRule = {
+  id: "OFFLINE-001",
+  name: "Offline Write Without Replay Identity",
+  description: "Detects persisted offline writes without a stable operation identity.",
+  category: "CORRECTNESS",
+  defaultSeverity: "MEDIUM",
+  check(ctx) {
+    if (!/(?:offline|queue|outbox|sync)/i.test(ctx.filePath)) return;
+    traverse(ctx.ast, {
+      CallExpression(path) {
+        const method = memberName(path.node.callee);
+        if (!method || !["add", "push", "enqueue", "setItem"].includes(method)) return;
+        const text = path.toString();
+        if (!/(?:post|put|patch|delete|mutation|request|payload)/i.test(text)) return;
+        if (/(?:idempotency|operationId|mutationId|requestId|\buuid\b|randomUUID)/i.test(text)) return;
+        report(ctx, path.node, "OFFLINE-001", "Queued offline write has no stable replay identity.",
+          "A crash or reconnect during acknowledgement can replay the same write and create duplicate server-side effects.",
+          "Persist a generated operation ID with the queued item and send it as an idempotency key on every replay.");
+      },
+    });
+  },
+};
+
+export const RealtimeOrderingRule: VerificationRule = {
+  id: "RACE-010",
+  name: "Unordered Realtime State Replacement",
+  description: "Detects realtime messages replacing state without rejecting older events.",
+  category: "CORRECTNESS",
+  defaultSeverity: "MEDIUM",
+  check(ctx) {
+    traverse(ctx.ast, {
+      AssignmentExpression(path) {
+        const left = path.node.left;
+        if (!t.isMemberExpression(left) || !t.isIdentifier(left.property) || !["onmessage", "ondata", "onupdate"].includes(left.property.name)) return;
+        if (!t.isFunction(path.node.right)) return;
+        const text = path.get("right").toString();
+        if (!/\bset[A-Z]\w*\s*\(/.test(text)) return;
+        if (/(?:sequence|version|revision|updatedAt|timestamp|lastEventId)/i.test(text)) return;
+        report(ctx, path.node, "RACE-010", "Realtime callback replaces state without an ordering/version guard.",
+          "Reconnects, buffered messages, and multiple transports can deliver older events after newer state has already rendered.",
+          "Compare a server sequence, revision, or timestamp against the latest applied value before replacing state.");
+      },
+    });
+  },
+};
+
 export const SERVER_STATE_RULES: VerificationRule[] = [
   QueryKeyCompletenessRule,
   RequestTimeoutRule,
   DevOnlyResponseValidationRule,
   UploadSizeValidationRule,
+  RefreshSingleFlightRule,
+  RetriedMutationIdempotencyRule,
+  InfiniteQueryPaginationRule,
+  OfflineReplayIdentityRule,
+  RealtimeOrderingRule,
 ];

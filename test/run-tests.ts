@@ -2155,6 +2155,69 @@ async function runTests() {
       "Upload with a file-size bound is clean",
     );
   }
+  {
+    const result = await verifier.verifyCode(
+      `api.interceptors.response.use(ok => ok, async error => { if (error.response.status === 401) { const token = await refreshToken(); return api(error.config); } throw error; });`,
+      "src/services/apiClient.ts",
+    );
+    assert(result.diagnostics.some((d) => d.ruleId === "RACE-009"), "Uncoordinated auth refresh is flagged");
+  }
+  {
+    const result = await verifier.verifyCode(
+      `let refreshPromise: Promise<string> | null = null; api.interceptors.response.use(ok => ok, async error => { if (error.response.status === 401) { refreshPromise ??= refreshToken(); try { await refreshPromise; return api(error.config); } finally { refreshPromise = null; } } throw error; });`,
+      "src/services/apiClient.ts",
+    );
+    assert(!result.diagnostics.some((d) => d.ruleId === "RACE-009"), "Single-flight auth refresh is clean");
+  }
+  await expectFinding(
+    `function useCreateOrder() { return useMutation({ mutationFn: (order) => api.post('/orders', order), retry: 3 }); }`,
+    "MUTATION-001",
+    "Retried write without idempotency is flagged",
+  );
+  await expectNoFinding(
+    `function useCreateOrder() { return useMutation({ mutationFn: (order) => api.post('/orders', order, { headers: { 'Idempotency-Key': order.operationId } }), retry: 3 }); }`,
+    "MUTATION-001",
+    "Retried write with operation identity is clean",
+  );
+  await expectFinding(
+    `function useFeed() { return useInfiniteQuery({ queryKey: ['feed'], queryFn: () => api.getFeed(), getNextPageParam: last => last.nextCursor }); }`,
+    "QUERY-002",
+    "Infinite query that ignores pageParam is flagged",
+  );
+  await expectFinding(
+    `function useFeed() { return useInfiniteQuery({ queryKey: ['feed'], queryFn: ({ pageParam }) => api.getFeed(pageParam) }); }`,
+    "QUERY-002",
+    "Infinite query without cursor progression is flagged",
+  );
+  await expectNoFinding(
+    `function useFeed() { return useInfiniteQuery({ queryKey: ['feed'], queryFn: ({ pageParam }) => api.getFeed(pageParam), getNextPageParam: last => last.nextCursor }); }`,
+    "QUERY-002",
+    "Cursor-driven infinite query is clean",
+  );
+  {
+    const result = await verifier.verifyCode(
+      `export function enqueueOffline(payload) { queue.push({ method: 'post', payload }); }`,
+      "src/offline/mutationQueue.ts",
+    );
+    assert(result.diagnostics.some((d) => d.ruleId === "OFFLINE-001"), "Offline write without replay identity is flagged");
+  }
+  {
+    const result = await verifier.verifyCode(
+      `export function enqueueOffline(payload) { queue.push({ operationId: crypto.randomUUID(), method: 'post', payload }); }`,
+      "src/offline/mutationQueue.ts",
+    );
+    assert(!result.diagnostics.some((d) => d.ruleId === "OFFLINE-001"), "Offline write with replay identity is clean");
+  }
+  await expectFinding(
+    `function usePrices(socket) { const [prices, setPrices] = useState({}); socket.onmessage = event => { setPrices(JSON.parse(event.data)); }; return prices; }`,
+    "RACE-010",
+    "Unordered realtime replacement is flagged",
+  );
+  await expectNoFinding(
+    `function usePrices(socket) { const [prices, setPrices] = useState({}); let lastSequence = 0; socket.onmessage = event => { const message = JSON.parse(event.data); if (message.sequence <= lastSequence) return; lastSequence = message.sequence; setPrices(message.data); }; return prices; }`,
+    "RACE-010",
+    "Sequence-guarded realtime replacement is clean",
+  );
 
   console.log("— Hygiene Rules");
   await expectFinding(
