@@ -371,6 +371,23 @@ export const UnusedImportRule: VerificationRule = {
 
     traverse(ctx.ast, {
       ImportDeclaration(path) {
+        // Type-only imports are exempt: babel's binding reference counts do
+        // not include type-annotation positions, so any reference check would
+        // produce false positives (e.g. `UseFormRegister<T>` in a props type).
+        if (path.node.importKind === "type") return;
+        const source = t.isStringLiteral(path.node.source)
+          ? path.node.source.value
+          : "";
+        // `import React from "react"` is exempt in files that contain JSX:
+        // whether the classic or automatic JSX runtime is in use is not
+        // visible to a syntax-only parse, so stay quiet.
+        const isReactDefault =
+          /^react$/.test(source) &&
+          jsxNames.size > 0 &&
+          path.node.specifiers.some(
+            (s) => t.isImportDefaultSpecifier(s) && s.local.name === "React",
+          );
+        if (isReactDefault) return;
         for (const spec of path.node.specifiers) {
           const name = spec.local.name;
           if (name.startsWith("_")) continue;

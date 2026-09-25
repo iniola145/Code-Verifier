@@ -26,6 +26,24 @@ import { loadConfig } from "../src/config";
 import * as fs from "fs";
 import * as os from "os";
 import { SemanticAnalysisIndex } from "../src/semantic-analysis";
+import { ImportGraphIndex } from "../src/unused-files";
+
+/** Recursively collects source files under dir, skipping node_modules/dist/.git. */
+function expandAllFiles(dir: string): string[] {
+  const skip = new Set(["node_modules", "dist", ".git"]);
+  const out: string[] = [];
+  const walk = (p: string): void => {
+    for (const entry of fs.readdirSync(p, { withFileTypes: true })) {
+      if (entry.isDirectory() && skip.has(entry.name)) continue;
+      const child = path.join(p, entry.name);
+      if (entry.isFile() && /\.(ts|tsx|js|jsx|mjs|cjs)$/.test(entry.name))
+        out.push(child);
+      else if (entry.isDirectory()) walk(child);
+    }
+  };
+  walk(dir);
+  return out;
+}
 import { verifyMobileConfigs } from "../src/mobile-config";
 import { verifyDeploymentConfigs } from "../src/deployment-config";
 import { verifyNativeConsistency } from "../src/native-consistency";
@@ -1875,6 +1893,106 @@ async function runTests() {
     `const cfg = { baseURL: 'http://localhost:3000' };`,
     "localhost http is exempt",
   );
+
+  console.log("— Hygiene: Unused Imports (HYG-003)");
+  await expectFinding(
+    `import { unused1 } from "./x"; export const a = 1;`,
+    "HYG-003",
+    "Detects unused named import",
+  );
+  await expectFinding(
+    `import Header from "./Header"; export const a = 1;`,
+    "HYG-003",
+    "Detects unused default import",
+  );
+  await expectFinding(
+    `import * as fs2 from "fs-extra"; export const a = 1;`,
+    "HYG-003",
+    "Detects unused namespace import",
+  );
+  await expectNoFinding(
+    `import type { Foo } from "./types"; export const a = 1;`,
+    "HYG-003",
+    "Type-only imports are exempt",
+  );
+  await expectNoFinding(
+    `import { Foo } from "./types"; type Wrapper = { f: Foo }; export type { Wrapper };`,
+    "HYG-003",
+    "Import used only in a type annotation stays quiet",
+  );
+  await expectNoFinding(
+    `import React from "react"; export function Screen() { return <div />; }`,
+    "HYG-003",
+    "React default import with JSX is exempt",
+  );
+  await expectNoFinding(
+    `import { View } from "react-native"; export function Screen() { return <View />; }`,
+    "HYG-003",
+    "Import used in JSX is used",
+  );
+  await expectNoFinding(
+    `import "./polyfill"; export const a = 1;`,
+    "HYG-003",
+    "Side-effect import stays quiet",
+  );
+  await expectNoFinding(
+    `import { inner } from "./inner"; export { inner };`,
+    "HYG-003",
+    "Re-exported symbol is exempt",
+  );
+  await expectNoFinding(
+    `import { _draft } from "./x"; export const a = 1;`,
+    "HYG-003",
+    "Underscore-prefixed import is exempt",
+  );
+  await expectNoFinding(
+    `import { value } from "./x"; export const a = value;`,
+    "HYG-003",
+    "Used import stays quiet",
+  );
+
+  console.log("— Hygiene: Orphaned Files (HYG-004)");
+  {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cv-orphan-"));
+    const write = (rel: string, content: string): void => {
+      const p = path.join(dir, rel);
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, content);
+    };
+    write("index.ts", `import { greet } from "./lib/used";\ngreet();\n`);
+    write("lib/used.ts", `export const greet = () => "hi";\n`);
+    write("lib/orphan.ts", `export const dead = 1;\n`);
+    write("App.tsx", `export default function App() { return null; }\n`);
+    write(
+      "app/profile.tsx",
+      `export default function Profile() { return null; }\n`,
+    );
+    write(
+      "src/api.test.ts",
+      `import { used } from "./api";\nexpect(used).toBe(1);\n`,
+    );
+    write("src/api.ts", `export const used = 1;\n`);
+    const index = ImportGraphIndex.fromFiles(
+      expandAllFiles(dir),
+    );
+    const reachable = (rel: string): boolean =>
+      index.isReachable(path.join(dir, rel));
+    assert(reachable("lib/used.ts"), "Imported file is reachable", "lib/used.ts");
+    assert(
+      !reachable("lib/orphan.ts"),
+      "Orphaned file is not reachable",
+      "lib/orphan.ts",
+    );
+    assert(reachable("App.tsx"), "Entry point App.tsx is exempt");
+    assert(reachable("app/profile.tsx"), "Expo Router route is exempt");
+    assert(reachable("src/api.test.ts"), "Test file is exempt");
+    assert(
+      reachable("src/api.ts"),
+      "File imported only by a test file is reachable",
+      "test import edge counts",
+    );
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 
   console.log("— Crash-Proofing");
   {
