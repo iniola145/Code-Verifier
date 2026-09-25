@@ -12,6 +12,7 @@ import { ProjectSummaryIndex } from "./abstract-interpreter/project-summaries";
 import { loadBaseline, writeBaseline } from "./baseline";
 import { DiagnosticSeverity } from "./types/verifier";
 import { SemanticAnalysisIndex } from "./semantic-analysis";
+import { ImportGraphIndex } from "./unused-files";
 import { verifyMobileConfigs } from "./mobile-config";
 import { verifyDeploymentConfigs } from "./deployment-config";
 import { verifyNativeConsistency } from "./native-consistency";
@@ -290,6 +291,7 @@ Examples:
         severityOverrides: config.severities,
         projectSummaryIndex: ProjectSummaryIndex.fromFiles(allFiles),
         semanticAnalysisIndex: SemanticAnalysisIndex.fromFiles(allFiles),
+        importGraphIndex: ImportGraphIndex.fromFiles(allFiles),
         baselineFingerprints,
         failOn,
         projectRoot,

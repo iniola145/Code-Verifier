@@ -11,6 +11,7 @@ import { buildFunctionSummaries } from './abstract-interpreter/function-summarie
 import { ProjectSummaryIndex } from './abstract-interpreter/project-summaries';
 import { diagnosticFingerprint } from './baseline';
 import { SemanticAnalysisIndex } from './semantic-analysis';
+import { ImportGraphIndex } from './unused-files';
 import { SymbolTable } from './abstract-interpreter/symbols';
 import { REGISTERED_RULES, getRuleMetadata } from './rules/registry';
 import {
@@ -34,6 +35,7 @@ export interface VerifierOptions {
   failOn?: Diagnostic['severity'];
   projectRoot?: string;
   semanticAnalysisIndex?: SemanticAnalysisIndex;
+  importGraphIndex?: ImportGraphIndex;
 }
 
 interface FunctionRoot {
@@ -142,6 +144,7 @@ export class CodeVerifier {
   private failOn: Diagnostic['severity'];
   private projectRoot?: string;
   private semanticAnalysisIndex?: SemanticAnalysisIndex;
+  private importGraphIndex?: ImportGraphIndex;
 
   constructor(options?: VerifierOptions) {
     this.rules = options?.rules || REGISTERED_RULES;
@@ -153,6 +156,7 @@ export class CodeVerifier {
     this.failOn = options?.failOn ?? 'MEDIUM';
     this.projectRoot = options?.projectRoot;
     this.semanticAnalysisIndex = options?.semanticAnalysisIndex;
+    this.importGraphIndex = options?.importGraphIndex;
   }
 
   /**
@@ -302,6 +306,27 @@ export class CodeVerifier {
     if (this.semanticAnalysisIndex) {
       diagnostics.push(...this.semanticAnalysisIndex.diagnosticsForFile(filePath));
       checks.push({ id: 'type-semantics', name: 'TypeScript semantic analysis', status: 'PASSED', required: true });
+    }
+
+    // 2b. Project-wide orphan-file check: needs the whole-project import
+    //     graph, which is built once in the CLI and passed in as an index.
+    if (this.importGraphIndex && !this.importGraphIndex.isReachable(filePath)) {
+      diagnostics.push({
+        id: `${filePath}:0:0:HYG-004`,
+        ruleId: 'HYG-004',
+        category: 'CORRECTNESS',
+        severity: 'LOW',
+        message: `File is never imported by any other file in the project.`,
+        explanation:
+          'Nothing references this file — it is dead code that still costs review time, type-checking, and (unless tree-shaken) bundle size. Entry points, config files, tests, stories, and route directories are exempt.',
+        filePath,
+        loc: { start: { line: 1, column: 0 }, end: { line: 1, column: 0 } },
+        codeSnippet: lines.length > 0 ? lines[0].slice(0, 120) : '',
+        remediation: {
+          summary: 'Delete the file, import it where intended, or wire it into an entry point.',
+          llmPromptHint: 'This file is never imported anywhere in the project. Remove it, or import/wire it where it was meant to be used.',
+        },
+      });
     }
 
     // 3. Surface abstract-interpretation truncation instead of failing silently
