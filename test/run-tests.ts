@@ -2303,6 +2303,7 @@ async function runTests() {
 
     const css = await projectVerifier.verifyFile(path.join(fixtureRoot, "CssCard.tsx"));
     assert(css.diagnostics.some((d) => d.ruleId === "STYLE-001" && /missing/.test(d.message)), "Undefined CSS-module class is flagged");
+    assert(!css.diagnostics.some((d) => d.ruleId === "STYLE-001" && /legacy-hook/.test(d.message)), "Undefined plain class on an explicitly styled element stays quiet");
     assert(css.diagnostics.some((d) => d.ruleId === "STYLE-002" && /obsolete/.test(d.message)), "Unused CSS-module class is flagged");
   }
   await expectNoFinding(
@@ -2314,6 +2315,11 @@ async function runTests() {
     `function useSubmit() { const handleSubmit = () => mutate(undefined, { onError(error) { if (isTerminal(error.message)) return; setError(error.message); } }); return handleSubmit; }`,
     "FORM-003",
     "Nested terminal-error callback is not mistaken for silent form validation",
+  );
+  await expectNoFinding(
+    `interface Props { onSave: (value: string) => void; onClose: () => void; } function Form({ onSave, onClose }: Props) { const handleSave = () => { onSave('ok'); onClose(); }; return <button onClick={handleSave}>Save</button>; }`,
+    "FORM-005",
+    "Explicitly synchronous submit callback can safely close immediately",
   );
 
   console.log("— Hygiene Rules");

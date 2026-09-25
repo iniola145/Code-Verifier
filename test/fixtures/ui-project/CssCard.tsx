@@ -1,5 +1,5 @@
 import styles from "./card.module.css";
 
 export function CssCard() {
-  return <div className={styles.card}><span className={styles.missing}>Card</span></div>;
+  return <div className={styles.card}><span className={styles.missing}>Card</span><i className="legacy-hook" style={{ color: "red" }} /></div>;
 }

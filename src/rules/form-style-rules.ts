@@ -32,6 +32,24 @@ function functionName(path: NodePath<t.Function>): string {
   return "";
 }
 
+function callbackIsExplicitlySynchronous(ctx: RuleContext, name: string): boolean {
+  let synchronous = false;
+  const isVoidFunction = (node: t.TSType | null | undefined): boolean =>
+    !!node && t.isTSFunctionType(node) && !!node.typeAnnotation && t.isTSVoidKeyword(node.typeAnnotation.typeAnnotation);
+  traverse(ctx.ast, {
+    TSPropertySignature(path) {
+      const key = path.node.key;
+      if ((t.isIdentifier(key, { name }) || t.isStringLiteral(key, { value: name })) && isVoidFunction(path.node.typeAnnotation?.typeAnnotation)) synchronous = true;
+    },
+    TSMethodSignature(path) {
+      const key = path.node.key;
+      if ((t.isIdentifier(key, { name }) || t.isStringLiteral(key, { value: name })) &&
+        path.node.typeAnnotation && t.isTSVoidKeyword(path.node.typeAnnotation.typeAnnotation)) synchronous = true;
+    },
+  });
+  return synchronous;
+}
+
 export const MissingFormSchemaValidationRule: VerificationRule = {
   id: "FORM-001", name: "Schema-Backed Form Submitted Without Validation",
   description: "Detects schema-derived form state submitted without parse or safeParse.", category: "CORRECTNESS", defaultSeverity: "MEDIUM",
@@ -143,6 +161,7 @@ export const PrematureFormCloseRule: VerificationRule = {
         const submit = calls.find((call) => /^(?:onCreate|onUpdate|onSave|onSubmit|mutateAsync?)$/.test(call.name));
         const close = calls.find((call) => /^(?:onClose|closeModal|dismiss)$/.test(call.name) && (call.path.node.start ?? 0) > (submit?.path.node.end ?? Infinity));
         if (!submit || !close || submit.path.parentPath.isAwaitExpression() || submit.path.parentPath.isReturnStatement()) return;
+        if (callbackIsExplicitlySynchronous(ctx, submit.name)) return;
         emit(ctx, close.path.node, "FORM-005", "Form closes immediately after an unawaited submission callback.",
           "If persistence fails or validation is rejected downstream, user input disappears and the UI can falsely imply success.",
           "Await a success result before closing, or let the mutation success callback own dismissal.", "LOW");
@@ -173,6 +192,8 @@ export const UndefinedStyleNameRule: VerificationRule = {
       },
       JSXAttribute(path) {
         if (cssClasses.size === 0 || !t.isJSXIdentifier(path.node.name, { name: "className" }) || !t.isStringLiteral(path.node.value)) return;
+        if (path.parentPath.isJSXOpeningElement() && path.parentPath.node.attributes.some((attribute) =>
+          t.isJSXAttribute(attribute) && t.isJSXIdentifier(attribute.name, { name: "style" }))) return;
         for (const name of path.node.value.value.split(/\s+/).filter(Boolean)) {
           if (/[:/[\]{}]/.test(name) || cssClasses.has(name)) continue;
           emit(ctx, path.node, "STYLE-001", `CSS class '${name}' is used but no local definition was found.`,
