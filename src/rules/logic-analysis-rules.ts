@@ -350,11 +350,39 @@ export const EmptyReduceRule: VerificationRule = {
     traverse(ctx.ast, {
       CallExpression(path) {
         if (!isMethodCall(path.node, "reduce") || path.node.arguments.length !== 1) return;
-        const receiver = path.node.callee.object;
+        const callee = path.node.callee;
+        if (!t.isMemberExpression(callee)) return;
+        const receiver = callee.object;
         if (t.isArrayExpression(receiver) && receiver.elements.length > 0) return;
         emit(ctx, path.node, "LOGIC-010", "reduce() has no initial value on an array that may be empty.",
           "Calling reduce without an initial accumulator throws TypeError for an empty array, turning valid empty input into a runtime failure.",
           "Pass an explicit initial accumulator or prove the collection is non-empty before reducing.", "CORRECTNESS", "MEDIUM");
+      },
+    });
+  },
+};
+
+export const AccidentalSwitchFallthroughRule: VerificationRule = {
+  id: "LOGIC-011",
+  name: "Unmarked Switch Fallthrough",
+  description: "Detects non-empty switch cases that fall through without an explicit marker.",
+  category: "CORRECTNESS",
+  defaultSeverity: "MEDIUM",
+  check(ctx) {
+    traverse(ctx.ast, {
+      SwitchStatement(path) {
+        const cases = path.node.cases;
+        for (let index = 0; index < cases.length - 1; index++) {
+          const current = cases[index];
+          if (current.consequent.length === 0) continue;
+          const last = current.consequent[current.consequent.length - 1];
+          if (t.isBreakStatement(last) || t.isReturnStatement(last) || t.isThrowStatement(last) || t.isContinueStatement(last)) continue;
+          const comments = [...(current.trailingComments ?? []), ...(last.trailingComments ?? []), ...(cases[index + 1].leadingComments ?? [])];
+          if (comments.some((comment) => /fall\s*-?through/i.test(comment.value))) continue;
+          emit(ctx, current, "LOGIC-011", "A non-empty switch case falls through to the next case.",
+            "Missing break/return commonly executes another case's logic and corrupts state while still appearing syntactically valid.",
+            "Add break, return, or throw; if fallthrough is intentional, document it with a fallthrough comment.", "CORRECTNESS", "MEDIUM");
+        }
       },
     });
   },
@@ -369,4 +397,5 @@ export const LOGIC_ANALYSIS_RULES: VerificationRule[] = [
   UnsafeFindResultRule,
   UnsafeArrayRemovalResultRule,
   EmptyReduceRule,
+  AccidentalSwitchFallthroughRule,
 ];

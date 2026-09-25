@@ -1951,6 +1951,16 @@ async function runTests() {
     "LOGIC-010",
     "reduce with an initial value is clean",
   );
+  await expectFinding(
+    `function status(code: number) { switch (code) { case 1: save(); case 2: send(); break; } }`,
+    "LOGIC-011",
+    "Unmarked switch fallthrough is flagged",
+  );
+  await expectNoFinding(
+    `function status(code: number) { switch (code) { case 1: save(); break; case 2: send(); break; } }`,
+    "LOGIC-011",
+    "Terminated switch cases are clean",
+  );
 
   console.log("— Hygiene Rules");
   await expectFinding(
