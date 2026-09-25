@@ -266,15 +266,35 @@ const METADATA: Record<string, MetadataFields> = {
     requirements: ["AST"],
     frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
   },
+  "QUERY-003": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+  },
+  "QUERY-004": {
+    confidence: "MEDIUM",
+    requirements: ["AST"],
+    frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+  },
   "MUTATION-001": {
     confidence: "HIGH",
     requirements: ["AST"],
     frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
   },
+  "MUTATION-002": {
+    confidence: "MEDIUM",
+    requirements: ["AST"],
+    frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+  },
   "OFFLINE-001": {
     confidence: "MEDIUM",
     requirements: ["AST"],
     frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
+  },
+  "STATE-001": {
+    confidence: "HIGH",
+    requirements: ["AST", "CFG"],
+    frameworks: ["TYPESCRIPT", "REACT", "WEB", "REACT_NATIVE", "EXPO"],
   },
   "SERVICE-003": {
     confidence: "HIGH",
@@ -290,6 +310,11 @@ const METADATA: Record<string, MetadataFields> = {
     confidence: "HIGH",
     requirements: ["AST"],
     frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
+  },
+  "SERVICE-006": {
+    confidence: "HIGH",
+    requirements: ["AST", "PROJECT_CONTEXT"],
+    frameworks: ["TYPESCRIPT", "REACT", "WEB", "REACT_NATIVE", "EXPO"],
   },
   "ASYNC-001": {
     confidence: "HIGH",

@@ -2218,6 +2218,68 @@ async function runTests() {
     "RACE-010",
     "Sequence-guarded realtime replacement is clean",
   );
+  await expectFinding(
+    `function Form() { const mutation = useMutation({ mutationFn: save }); const handleSubmit = async () => { await mutation.mutateAsync(); }; return <form onSubmit={handleSubmit} />; }`,
+    "MUTATION-002",
+    "Submit mutation without a pending guard is flagged",
+  );
+  await expectNoFinding(
+    `function Form() { const mutation = useMutation({ mutationFn: save }); const handleSubmit = async () => { if (mutation.isPending) return; await mutation.mutateAsync(); }; return <form onSubmit={handleSubmit}><button disabled={mutation.isPending} /></form>; }`,
+    "MUTATION-002",
+    "Pending-guarded submit mutation is clean",
+  );
+  await expectFinding(
+    `function useSaveItem() { return useMutation({ mutationFn: save, onSuccess(data, variables) { queryClient.setQueryData(['item-detail'], { ...data, id: variables.id }); } }); }`,
+    "QUERY-003",
+    "Detail cache write without entity identity is flagged",
+  );
+  await expectNoFinding(
+    `function useSaveItem() { return useMutation({ mutationFn: save, onSuccess(data, variables) { queryClient.setQueryData(['item-detail', variables.id], data); } }); }`,
+    "QUERY-003",
+    "Entity-scoped detail cache write is clean",
+  );
+  await expectFinding(
+    `function useSave() { return useMutation({ mutationFn: save, onSuccess() { queryClient.invalidateQueries({ queryKey: ['items'] }); navigate('/items'); } }); }`,
+    "QUERY-004",
+    "Background mutation invalidation is flagged",
+  );
+  await expectNoFinding(
+    `function useSave() { return useMutation({ mutationFn: save, async onSuccess() { await queryClient.invalidateQueries({ queryKey: ['items'] }); } }); }`,
+    "QUERY-004",
+    "Awaited mutation invalidation is clean",
+  );
+  await expectFinding(
+    `async function load() { setLoading(true); const result = await api.get('/items'); setItems(result.data); setLoading(false); }`,
+    "STATE-001",
+    "Loading state cleared only after successful await is flagged",
+  );
+  await expectNoFinding(
+    `async function load() { setLoading(true); try { const result = await api.get('/items'); setItems(result.data); } finally { setLoading(false); } }`,
+    "STATE-001",
+    "Loading state cleared in finally is clean",
+  );
+  {
+    const result = await verifier.verifyCode(
+      `import { UserSchema } from './schemas'; export async function getUser() { const response = await api.get('/user'); return response.data; }`,
+      "src/services/userApi.ts",
+    );
+    assert(result.diagnostics.some((d) => d.ruleId === "SERVICE-006"), "Available response schema bypass is flagged");
+  }
+  {
+    const result = await verifier.verifyCode(
+      `import { UserSchema } from './schemas'; export async function getUser() { const response = await api.get('/user'); return UserSchema.parse(response.data); }`,
+      "src/services/userApi.ts",
+    );
+    assert(!result.diagnostics.some((d) => d.ruleId === "SERVICE-006"), "Response parsed with available schema is clean");
+  }
+  {
+    const fixtureRoot = path.resolve(__dirname, "fixtures/project-summaries");
+    const helper = path.join(fixtureRoot, "coordinated-refresh.fixture");
+    const consumer = path.join(fixtureRoot, "refresh-consumer.fixture");
+    const projectVerifier = new CodeVerifier({ projectSummaryIndex: ProjectSummaryIndex.fromFiles([helper, consumer]) });
+    const result = await projectVerifier.verifyFile(consumer);
+    assert(!result.diagnostics.some((d) => d.ruleId === "RACE-009"), "Imported single-flight refresh helper is recognized across files");
+  }
 
   console.log("— Hygiene Rules");
   await expectFinding(

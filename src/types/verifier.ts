@@ -1,5 +1,6 @@
 import type { SymbolTable } from "../abstract-interpreter/symbols";
 import type { FunctionSummary } from "../abstract-interpreter/function-summaries";
+import type { ProjectFunctionBehavior } from "../abstract-interpreter/project-summaries";
 
 export type DiagnosticCategory =
   | "SECURITY"
@@ -208,6 +209,8 @@ export interface RuleContext {
   cfgs: CFG[]; // one CFG per function body + the module top level
   symbols: SymbolTable;
   functionSummaries: Map<string, FunctionSummary>;
+  /** Behaviors proven for functions imported from another analyzed project file. */
+  projectFunctionBehaviors: Map<string, ProjectFunctionBehavior>;
   /** Project root, when known — lets path-convention rules (e.g. Expo Router) resolve files precisely. */
   projectRoot?: string;
   report: (diagnostic: Omit<Diagnostic, "filePath">) => void;

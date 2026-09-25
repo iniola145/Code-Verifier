@@ -10,13 +10,14 @@ function report(
   message: string,
   explanation: string,
   remediation: string,
+  severity: "MEDIUM" | "LOW" = "MEDIUM",
 ): void {
   const loc = nodeToLocation(node);
   ctx.report({
     id: `${ctx.filePath}:${loc.start.line}:${loc.start.column}:${ruleId}`,
     ruleId,
     category: "CORRECTNESS",
-    severity: "MEDIUM",
+    severity,
     message,
     explanation,
     loc,
@@ -233,6 +234,9 @@ export const RefreshSingleFlightRule: VerificationRule = {
         const text = path.toString();
         if (!/\b401\b/.test(text) || !/(?:refreshToken|refreshAccessToken|\/refresh\b|refresh\s*\()/i.test(text)) return;
         if (/(?:refreshPromise|isRefreshing|failedQueue|refreshQueue|subscribers|singleFlight|mutex)/i.test(text)) return;
+        const delegatesToCoordinatedRefresh = [...ctx.projectFunctionBehaviors].some(([name, behavior]) =>
+          behavior.singleFlightRefresh && new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\(`).test(text));
+        if (delegatesToCoordinatedRefresh) return;
         report(ctx, path.node, "RACE-009", "Concurrent 401 responses can start overlapping token refreshes.",
           "Parallel API failures may rotate credentials multiple times, overwrite a newer token, or retry requests with an invalidated token.",
           "Share one in-flight refresh promise, queue failed requests behind it, and clear the coordinator in finally.");
@@ -346,6 +350,179 @@ export const RealtimeOrderingRule: VerificationRule = {
   },
 };
 
+export const DuplicateSubmissionRule: VerificationRule = {
+  id: "MUTATION-002",
+  name: "Unguarded Duplicate Submission",
+  description: "Detects submit handlers that can invoke the same mutation repeatedly while it is pending.",
+  category: "CORRECTNESS",
+  defaultSeverity: "MEDIUM",
+  check(ctx) {
+    traverse(ctx.ast, {
+      JSXAttribute(path) {
+        if (!t.isJSXIdentifier(path.node.name) || !["onSubmit", "onPress"].includes(path.node.name.name)) return;
+        if (!t.isJSXExpressionContainer(path.node.value) || !t.isIdentifier(path.node.value.expression)) return;
+        const handler = path.node.value.expression.name;
+        if (!/(?:submit|save|create|apply|pay|send|confirm)/i.test(handler)) return;
+        const binding = path.scope.getBinding(handler);
+        const functionPath = binding?.path.isVariableDeclarator() ? binding.path.get("init") : binding?.path;
+        if (!functionPath?.isFunction()) return;
+        const text = functionPath.toString();
+        if (!/(?:\.mutate(?:Async)?|\bmutate(?:Async)?)\s*\(/.test(text)) return;
+        const component = path.getFunctionParent()?.toString() ?? ctx.code;
+        if (/(?:isPending|isLoading|submitting|inFlight|disabled)\b/i.test(text + component)) return;
+        report(ctx, functionPath.node, "MUTATION-002", `Submission handler '${handler}' has no pending-operation guard.`,
+          "Rapid taps, Enter-key repeats, or delayed mobile feedback can dispatch the same mutation more than once.",
+          "Return early while the mutation is pending and disable the submitting control; retain server-side idempotency for irreversible writes.");
+      },
+    });
+  },
+};
+
+export const DetailCacheIdentityRule: VerificationRule = {
+  id: "QUERY-003",
+  name: "Mutation Detail Cache Missing Identity",
+  description: "Detects mutation callbacks writing entity-detail data into an unscoped cache key.",
+  category: "CORRECTNESS",
+  defaultSeverity: "MEDIUM",
+  check(ctx) {
+    traverse(ctx.ast, {
+      ObjectProperty(path) {
+        if (!(t.isIdentifier(path.node.key, { name: "onSuccess" }) || t.isStringLiteral(path.node.key, { value: "onSuccess" })) || !t.isFunction(path.node.value)) return;
+        const variables = path.node.value.params[1];
+        if (!t.isIdentifier(variables)) return;
+        path.get("value").traverse({
+          CallExpression(call) {
+            if (memberName(call.node.callee) !== "setQueryData") return;
+            const key = call.node.arguments[0];
+            if (!t.isArrayExpression(key) || key.elements.length !== 1 || !t.isStringLiteral(key.elements[0])) return;
+            if (!/(?:detail|item|user|order|application|assessment|profile)$/i.test(key.elements[0].value)) return;
+            const callbackText = call.toString();
+            if (!new RegExp(`\\b${variables.name}\\b`).test(callbackText)) return;
+            report(ctx, key, "QUERY-003", `Detail cache key '${key.elements[0].value}' omits the mutated entity identity.`,
+              "Updates for different records will overwrite the same cache entry and can show one user's or entity's data on another screen.",
+              `Include the stable entity ID from ${variables.name} in the setQueryData key.`);
+          },
+        });
+      },
+      ObjectMethod(path) {
+        if (!(t.isIdentifier(path.node.key, { name: "onSuccess" }) || t.isStringLiteral(path.node.key, { value: "onSuccess" }))) return;
+        const variables = path.node.params[1];
+        if (!t.isIdentifier(variables)) return;
+        path.traverse({
+          CallExpression(call) {
+            if (memberName(call.node.callee) !== "setQueryData") return;
+            const key = call.node.arguments[0];
+            if (!t.isArrayExpression(key) || key.elements.length !== 1 || !t.isStringLiteral(key.elements[0])) return;
+            if (!/(?:detail|item|user|order|application|assessment|profile)$/i.test(key.elements[0].value)) return;
+            if (!new RegExp(`\\b${variables.name}\\b`).test(call.toString())) return;
+            report(ctx, key, "QUERY-003", `Detail cache key '${key.elements[0].value}' omits the mutated entity identity.`,
+              "Updates for different records will overwrite the same cache entry and can show one user's or entity's data on another screen.",
+              `Include the stable entity ID from ${variables.name} in the setQueryData key.`);
+          },
+        });
+      },
+    });
+  },
+};
+
+export const AsyncLoadingTerminalStateRule: VerificationRule = {
+  id: "STATE-001",
+  name: "Async Loading State Can Remain Stuck",
+  description: "Detects async operations that clear loading only on the success path.",
+  category: "CORRECTNESS",
+  defaultSeverity: "MEDIUM",
+  check(ctx) {
+    traverse(ctx.ast, {
+      Function(path) {
+        if (!path.node.async) return;
+        const text = path.toString();
+        const start = text.match(/\b(set[A-Z]\w*(?:Loading|Pending)|setLoading)\s*\(\s*true\s*\)/);
+        if (!start || !/\bawait\b/.test(text)) return;
+        const setter = start[1];
+        if (!new RegExp(`\\b${setter}\\s*\\(\\s*false\\s*\\)`).test(text)) return;
+        let safeFinally = false;
+        path.traverse({
+          TryStatement(inner) {
+            if (inner.node.finalizer && new RegExp(`\\b${setter}\\s*\\(\\s*false\\s*\\)`).test(inner.get("finalizer").toString())) safeFinally = true;
+          },
+        });
+        if (safeFinally) return;
+        report(ctx, path.node, "STATE-001", `Loading setter '${setter}' is not cleared in finally.`,
+          "If an awaited request rejects before the success-path reset, the UI can remain permanently disabled or show an endless spinner.",
+          `Move ${setter}(false) into a finally block that covers every awaited operation after loading begins.`);
+      },
+    });
+  },
+};
+
+export const AvailableSchemaNotAppliedRule: VerificationRule = {
+  id: "SERVICE-006",
+  name: "Available API Schema Not Applied",
+  description: "Detects service modules returning raw response data despite importing a response schema.",
+  category: "CORRECTNESS",
+  defaultSeverity: "MEDIUM",
+  check(ctx) {
+    if (!isApiBoundary(ctx.filePath)) return;
+    const schemas = new Set<string>();
+    for (const statement of ctx.ast.program.body) if (t.isImportDeclaration(statement)) {
+      for (const specifier of statement.specifiers) if ((t.isImportSpecifier(specifier) || t.isImportDefaultSpecifier(specifier)) && /Schema$/.test(specifier.local.name)) schemas.add(specifier.local.name);
+    }
+    if (schemas.size === 0) return;
+    traverse(ctx.ast, {
+      Function(path) {
+        const text = path.toString();
+        if (!/(?:await\s+.*\.(?:get|post|put|patch|delete)\s*\(|await\s+fetch\s*\()/s.test(text)) return;
+        if (!/return\s+\w+\.data\b/.test(text)) return;
+        if ([...schemas].some((schema) => new RegExp(`\\b${schema}\\s*\\.\\s*(?:parse|safeParse)\\s*\\(`).test(text))) return;
+        report(ctx, path.node, "SERVICE-006", `Raw API response bypasses an imported runtime schema (${[...schemas].join(", ")}).`,
+          "The module declares the expected wire contract but lets malformed production payloads escape into hooks and components unchecked.",
+          "Parse response.data with the matching schema and return the parsed value from the service boundary.");
+      },
+    });
+  },
+};
+
+export const UnawaitedInvalidationRule: VerificationRule = {
+  id: "QUERY-004",
+  name: "Mutation Cache Invalidation Not Awaited",
+  description: "Detects mutation callbacks that finish before asynchronous cache invalidation completes.",
+  category: "CORRECTNESS",
+  defaultSeverity: "LOW",
+  check(ctx) {
+    const reportedCallbacks = new WeakSet<t.Node>();
+    traverse(ctx.ast, {
+      CallExpression(path) {
+        if (memberName(path.node.callee) !== "invalidateQueries") return;
+        const callback = path.getFunctionParent();
+        if (!callback) return;
+        const owner = callback.isObjectMethod() ? callback : callback.parentPath;
+        const isMutationCallback = (owner.isObjectProperty() || owner.isObjectMethod()) &&
+          ((t.isIdentifier(owner.node.key) && ["onSuccess", "onSettled"].includes(owner.node.key.name)) ||
+            (t.isStringLiteral(owner.node.key) && ["onSuccess", "onSettled"].includes(owner.node.key.value)));
+        if (!isMutationCallback) return;
+        if (path.parentPath.isAwaitExpression() || path.parentPath.isReturnStatement() ||
+          (callback.isArrowFunctionExpression() && callback.node.body === path.node)) return;
+        let exitsAfterInvalidation = false;
+        callback.traverse({
+          CallExpression(other) {
+            if ((other.node.start ?? 0) <= (path.node.end ?? 0)) return;
+            const callee = other.node.callee;
+            if (t.isIdentifier(callee) && ["navigate", "onClose", "closeModal", "dismiss", "resetForm"].includes(callee.name)) exitsAfterInvalidation = true;
+            if (t.isMemberExpression(callee) && t.isIdentifier(callee.object, { name: "router" }) &&
+              t.isIdentifier(callee.property) && ["push", "replace", "back"].includes(callee.property.name)) exitsAfterInvalidation = true;
+          },
+        });
+        if (!exitsAfterInvalidation) return;
+        if (reportedCallbacks.has(callback.node)) return;
+        reportedCallbacks.add(callback.node);
+        report(ctx, path.node, "QUERY-004", "Mutation callback does not await or return cache invalidation.",
+          "The mutation can become successful and navigation or rendering can continue while affected queries still contain stale data.",
+          "Await invalidateQueries, return its promise, or explicitly document that background invalidation is intentional.", "LOW");
+      },
+    });
+  },
+};
+
 export const SERVER_STATE_RULES: VerificationRule[] = [
   QueryKeyCompletenessRule,
   RequestTimeoutRule,
@@ -356,4 +533,9 @@ export const SERVER_STATE_RULES: VerificationRule[] = [
   InfiniteQueryPaginationRule,
   OfflineReplayIdentityRule,
   RealtimeOrderingRule,
+  DuplicateSubmissionRule,
+  DetailCacheIdentityRule,
+  AsyncLoadingTerminalStateRule,
+  AvailableSchemaNotAppliedRule,
+  UnawaitedInvalidationRule,
 ];

@@ -7,7 +7,14 @@ import { buildFunctionSummaries, FunctionSummary } from "./function-summaries";
 
 interface ModuleSummary {
   exports: Map<string, FunctionSummary>;
+  behaviors: Map<string, ProjectFunctionBehavior>;
   ast: t.File;
+}
+
+export interface ProjectFunctionBehavior {
+  singleFlightRefresh: boolean;
+  validatesResponse: boolean;
+  performsApiWrite: boolean;
 }
 
 const RESOLUTION_SUFFIXES = ["", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"];
@@ -80,6 +87,29 @@ export class ProjectSummaryIndex {
     return summaries;
   }
 
+  behaviorsForFile(ast: t.File, filePath: string): Map<string, ProjectFunctionBehavior> {
+    const behaviors = new Map<string, ProjectFunctionBehavior>();
+    for (const statement of ast.program.body) {
+      if (!t.isImportDeclaration(statement)) continue;
+      const resolved = this.resolveImport(filePath, statement.source.value);
+      const module = resolved ? this.modules.get(resolved) : undefined;
+      if (!module) continue;
+      for (const specifier of statement.specifiers) {
+        if (t.isImportSpecifier(specifier)) {
+          const imported = t.isIdentifier(specifier.imported) ? specifier.imported.name : specifier.imported.value;
+          const behavior = module.behaviors.get(imported);
+          if (behavior) behaviors.set(specifier.local.name, behavior);
+        } else if (t.isImportDefaultSpecifier(specifier)) {
+          const behavior = module.behaviors.get("default");
+          if (behavior) behaviors.set(specifier.local.name, behavior);
+        } else if (t.isImportNamespaceSpecifier(specifier)) {
+          for (const [name, behavior] of module.behaviors) behaviors.set(`${specifier.local.name}.${name}`, behavior);
+        }
+      }
+    }
+    return behaviors;
+  }
+
   private indexFile(filePath: string): void {
     try {
       const parsed = parseSourceCode(
@@ -88,12 +118,17 @@ export class ProjectSummaryIndex {
       );
       const local = buildFunctionSummaries(parsed.ast);
       const exported = new Map<string, FunctionSummary>();
+      const behaviors = new Map<string, ProjectFunctionBehavior>();
+      const code = fs.readFileSync(filePath, "utf8");
+      const localBehaviors = collectFunctionBehaviors(parsed.ast, code);
       for (const statement of parsed.ast.program.body) {
         if (t.isExportNamedDeclaration(statement)) {
           if (statement.declaration) {
             for (const name of declarationNames(statement.declaration)) {
               const summary = local.get(name);
               if (summary) exported.set(name, summary);
+              const behavior = localBehaviors.get(name);
+              if (behavior) behaviors.set(name, behavior);
             }
           }
           for (const specifier of statement.specifiers) {
@@ -103,6 +138,8 @@ export class ProjectSummaryIndex {
             if (!exportedName) continue;
             const summary = local.get(localName);
             if (summary) exported.set(exportedName, summary);
+            const behavior = localBehaviors.get(localName);
+            if (behavior) behaviors.set(exportedName, behavior);
           }
         } else if (t.isExportDefaultDeclaration(statement)) {
           const declaration = statement.declaration;
@@ -111,9 +148,11 @@ export class ProjectSummaryIndex {
               ? declaration.id.name
               : "default";
           if (local.has(name)) exported.set("default", local.get(name)!);
+          const behavior = localBehaviors.get(name);
+          if (behavior) behaviors.set("default", behavior);
         }
       }
-      this.modules.set(filePath, { exports: exported, ast: parsed.ast });
+      this.modules.set(filePath, { exports: exported, behaviors, ast: parsed.ast });
     } catch {
       // The normal verifier reports parse/read failures. The summary index
       // simply withholds facts it could not prove.
@@ -146,6 +185,12 @@ export class ProjectSummaryIndex {
               });
               changed = true;
             }
+            for (const [exportedName, behavior] of target.behaviors) {
+              if (exportedName !== "default" && !module.behaviors.has(exportedName)) {
+                module.behaviors.set(exportedName, behavior);
+                changed = true;
+              }
+            }
             continue;
           }
           if (!t.isExportNamedDeclaration(statement) || !statement.source)
@@ -166,6 +211,11 @@ export class ProjectSummaryIndex {
                 ...summary,
                 name: exportedName,
               });
+              changed = true;
+            }
+            const behavior = target.behaviors.get(importedName);
+            if (exportedName && behavior && !module.behaviors.has(exportedName)) {
+              module.behaviors.set(exportedName, behavior);
               changed = true;
             }
           }
@@ -258,6 +308,28 @@ export class ProjectSummaryIndex {
     }
     this.tsConfigs.sort((a, b) => b.directory.length - a.directory.length);
   }
+}
+
+function collectFunctionBehaviors(ast: t.File, code: string): Map<string, ProjectFunctionBehavior> {
+  const result = new Map<string, ProjectFunctionBehavior>();
+  const record = (name: string, node: t.Function): void => {
+    const text = node.start != null && node.end != null ? code.slice(node.start, node.end) : "";
+    result.set(name, {
+      singleFlightRefresh: /(?:refreshPromise|isRefreshing|failedQueue|refreshQueue|subscribers|singleFlight|mutex)/i.test(text),
+      validatesResponse: /\.(?:parse|safeParse|validate|decode)\s*\(/.test(text),
+      performsApiWrite: /\.(?:post|put|patch|delete)\s*\(/i.test(text),
+    });
+  };
+  for (const statement of ast.program.body) {
+    const declaration = t.isExportNamedDeclaration(statement) || t.isExportDefaultDeclaration(statement)
+      ? statement.declaration
+      : statement;
+    if (t.isFunctionDeclaration(declaration) && declaration.id) record(declaration.id.name, declaration);
+    if (t.isVariableDeclaration(declaration)) for (const item of declaration.declarations) {
+      if (t.isIdentifier(item.id) && (t.isFunctionExpression(item.init) || t.isArrowFunctionExpression(item.init))) record(item.id.name, item.init);
+    }
+  }
+  return result;
 }
 
 function isInside(file: string, directory: string): boolean {

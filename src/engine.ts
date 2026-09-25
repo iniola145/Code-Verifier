@@ -183,6 +183,7 @@ export class CodeVerifier {
     //    abstract interpretation on each.
     const cfgs: CFG[] = [];
     const functionSummaries = this.projectSummaryIndex?.summariesForFile(ast, filePath) ?? new Map();
+    const projectFunctionBehaviors = this.projectSummaryIndex?.behaviorsForFile(ast, filePath) ?? new Map();
     for (const [name, summary] of buildFunctionSummaries(ast, functionSummaries)) functionSummaries.set(name, summary);
     let truncatedCount = 0;
     let abstractAnalysisIncomplete = false;
@@ -259,6 +260,7 @@ export class CodeVerifier {
       cfgs,
       symbols,
       functionSummaries,
+      projectFunctionBehaviors,
       projectRoot: this.projectRoot,
       report: (d) => {
         diagnostics.push({
