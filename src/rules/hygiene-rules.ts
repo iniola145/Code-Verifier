@@ -313,9 +313,86 @@ export const UnusedLocalRule: VerificationRule = {
   },
 };
 
+// -------------------------------------------------------------------------
+// 4. Unused imports.
+// -------------------------------------------------------------------------
+export const UnusedImportRule: VerificationRule = {
+  id: "HYG-003",
+  name: "Unused Import",
+  description:
+    "Detects imported symbols that are never referenced in the importing file. Side-effect imports, re-exports, and _-prefixed names are exempt.",
+  category: "CORRECTNESS",
+  defaultSeverity: "LOW",
+  check: (ctx: RuleContext) => {
+    const jsxNames = collectJsxIdentifierNames(ctx);
+    // `export { X } from "./y"` and `export * from "./y"` consume the source
+    // module's bindings without local references, so treat those names as used.
+    const reExportedNames = new Set<string>();
+    traverse(ctx.ast, {
+      ExportNamedDeclaration(path) {
+        if (path.node.source) {
+          for (const spec of path.node.specifiers) {
+            if (
+              t.isExportSpecifier(spec) &&
+              t.isIdentifier(spec.local, { name: "default" })
+            ) {
+              // `export { default } from "./y"` — no local name to track.
+              continue;
+            }
+            if (t.isExportSpecifier(spec) && t.isIdentifier(spec.local))
+              reExportedNames.add(spec.local.name);
+          }
+        }
+      },
+      ExportAllDeclaration(path) {
+        // `export * from "./y"` pulls in everything; the declaration itself is
+        // the only consumer, so the source is covered by HYG-004's graph.
+      },
+    });
+
+    const report = (node: t.Node, name: string, kind: string): void => {
+      const loc = nodeToLocation(node);
+      ctx.report({
+        id: `${ctx.filePath}:${loc.start.line}:${loc.start.column}:HYG-003`,
+        ruleId: "HYG-003",
+        category: "CORRECTNESS",
+        severity: "LOW",
+        message: `Imported ${kind} '${name}' is never used in this file.`,
+        explanation:
+          "The import adds a dependency edge and a name to the file's scope without contributing anything — dead weight that bundlers tree-shake only sometimes, and readers always pay for.",
+        loc,
+        codeSnippet: extractCodeSnippet(ctx.lines, loc),
+        remediation: {
+          summary: `Remove the import of '${name}', or use it where it was intended.`,
+          llmPromptHint: `Remove the unused import of '${name}' from this file, or wire it into the logic that needed it.`,
+        },
+      });
+    };
+
+    traverse(ctx.ast, {
+      ImportDeclaration(path) {
+        for (const spec of path.node.specifiers) {
+          const name = spec.local.name;
+          if (name.startsWith("_")) continue;
+          if (reExportedNames.has(name) || jsxNames.has(name)) continue;
+          const binding = path.scope.getBinding(name);
+          if (!binding || binding.references !== 0) continue;
+          const kind = t.isImportDefaultSpecifier(spec)
+            ? "default"
+            : t.isImportNamespaceSpecifier(spec)
+              ? "namespace"
+              : "symbol";
+          report(spec, name, kind);
+        }
+      },
+    });
+  },
+};
+
 export const HYGIENE_RULES: VerificationRule[] = [
   TargetBlankRule,
   DebuggerRule,
   InsecureHttpUrlRule,
   UnusedLocalRule,
+  UnusedImportRule,
 ];
