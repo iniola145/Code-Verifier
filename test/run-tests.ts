@@ -1941,6 +1941,16 @@ async function runTests() {
     "LOGIC-009",
     "Optional Array.shift result access is clean",
   );
+  await expectFinding(
+    `export const total = (values: number[]) => values.reduce((a, b) => a + b);`,
+    "LOGIC-010",
+    "reduce without an initial value is flagged",
+  );
+  await expectNoFinding(
+    `export const total = (values: number[]) => values.reduce((a, b) => a + b, 0);`,
+    "LOGIC-010",
+    "reduce with an initial value is clean",
+  );
 
   console.log("— Hygiene Rules");
   await expectFinding(

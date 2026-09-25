@@ -340,6 +340,26 @@ export const UnsafeArrayRemovalResultRule: VerificationRule = {
   },
 };
 
+export const EmptyReduceRule: VerificationRule = {
+  id: "LOGIC-010",
+  name: "Reduce Without Initial Value",
+  description: "Detects reduce calls that can throw when the input array is empty.",
+  category: "CORRECTNESS",
+  defaultSeverity: "MEDIUM",
+  check(ctx) {
+    traverse(ctx.ast, {
+      CallExpression(path) {
+        if (!isMethodCall(path.node, "reduce") || path.node.arguments.length !== 1) return;
+        const receiver = path.node.callee.object;
+        if (t.isArrayExpression(receiver) && receiver.elements.length > 0) return;
+        emit(ctx, path.node, "LOGIC-010", "reduce() has no initial value on an array that may be empty.",
+          "Calling reduce without an initial accumulator throws TypeError for an empty array, turning valid empty input into a runtime failure.",
+          "Pass an explicit initial accumulator or prove the collection is non-empty before reducing.", "CORRECTNESS", "MEDIUM");
+      },
+    });
+  },
+};
+
 export const LOGIC_ANALYSIS_RULES: VerificationRule[] = [
   NullableArithmeticRule,
   DefiniteZeroDivisionRule,
@@ -348,4 +368,5 @@ export const LOGIC_ANALYSIS_RULES: VerificationRule[] = [
   NullableStateLifecycleRule,
   UnsafeFindResultRule,
   UnsafeArrayRemovalResultRule,
+  EmptyReduceRule,
 ];
