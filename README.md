@@ -13,7 +13,7 @@ A static verification and security engine for **React, React Native, and Expo** 
      - **Nullability**: proves/flags actual null/undefined dereferences (CWE-476).
      - **Taint tracking**: source→sink flows from deep links, navigation params, and unencrypted storage into `AsyncStorage`/WebView sinks (CWE-312 / CWE-79).
      - **Interval domain**: numeric bounds with widening; used internally and surfaced in invariants.
-2. **Implemented TypeScript / React / React Native / Expo / Web Rules** (79 rules)
+2. **Implemented TypeScript / React / React Native / Expo / Web Rules** (94 rules)
    | Rule | Check | CWE |
    |---|---|---|
    | `RN-SEC-001` | Sensitive data in unencrypted `AsyncStorage` | CWE-312 |
@@ -42,6 +42,14 @@ A static verification and security engine for **React, React Native, and Expo** 
    | `LOGIC-001` | Assignment used as a branch or loop condition | Correctness |
    | `LOGIC-002` | Value-producing array callback with no return | Correctness |
    | `LOGIC-003` | Unreachable statement after unconditional control flow | Correctness |
+   | `LOGIC-004` | Nullable/undefined value used in arithmetic, including nullable React state initialized with a number | Correctness |
+   | `LOGIC-005` | Definite division or remainder by zero | Correctness |
+   | `LOGIC-006` | Parsed numeric input used directly in arithmetic without a NaN fallback | Correctness |
+   | `LOGIC-007` | Equality comparison against NaN, which is never equal to itself | Correctness |
+   | `LOGIC-008` | Immediate dereference of a possibly-undefined `Array.find()` result | Correctness |
+   | `LOGIC-009` | Immediate dereference of a possibly-undefined `pop()`/`shift()` result | Correctness |
+   | `LOGIC-010` | `reduce()` without an initial accumulator on a possibly-empty array | Correctness |
+   | `LOGIC-011` | Non-empty switch case falls through without termination or an intentional marker | Correctness |
    | `ASYNC-001` | Async callback passed to `forEach`, which does not await promises | Correctness |
    | `ASYNC-002` | Async function used as a Promise constructor executor | Correctness |
    | `REACT-004` | Async function passed directly to an Effect | React lifecycle |
@@ -61,6 +69,12 @@ A static verification and security engine for **React, React Native, and Expo** 
    | `REACT-018` | Import from `react-dom/test-utils` (removed in React 19; `act` moved to `React.act`) | React 19 testing |
    | `REACT-019` | `forwardRef` wrapper no longer needed — React 19 passes `ref` as a regular prop (advisory; forwardRef still works for React < 19 consumers) | React 19 upgrade |
    | `REACT-020` | Module defines components **and** exports non-component values (route tables, config objects, helpers) — Fast Refresh (Vite/Metro) cannot hot-swap it, so edits fall back to a full reload and drop state. Type exports, hook exports, re-exports, and primitive constant exports are exempt | Fast Refresh |
+   | `REACT-021` | Nullable state is dereferenced as though its non-null initial value persists across future renders | React state lifecycle |
+   | `REACT-022` | Dependency-driven Effect fetch updates state without cancellation cleanup | React async lifecycle |
+   | `REACT-023` | Effect timeout performs a delayed state update without `clearTimeout` cleanup | React lifecycle |
+   | `REACT-024` | Async/timer callback derives a state update from a stale captured render value | React state |
+   | `SERVICE-001` | Fetch response body consumed without checking `response.ok` or status | Service correctness |
+   | `SERVICE-002` | Fetch abort timeout is never cleared after request completion | Resource lifecycle |
    | `HYG-002` | `const`/`let` or function declaration never referenced afterwards (or assigned but never read); exports, destructuring, and `_`-prefixed names exempt | Dead code |
    | `RN-COR-001` | FlatList or SectionList key extractor returns the item index | React Native lists |
    | `RN-COR-002` | Mixed `useNativeDriver` values within one `Animated.parallel`/`sequence`/`stagger` group | React Native animations |
@@ -236,7 +250,11 @@ Also available: `// code-verifier-disable` (this + next line) and `// code-verif
 npm test
 ```
 
-306 tests: logic, async, compiler-backed Promise semantics, multi-layer interprocedural and object-field flows, Expo/native, IaC, and supply-chain configuration, backend/API correctness, persistent caching and scheduling, React/React Native correctness, React Native animation driver/latch and pan-responder capture rules, reliability, code-quality, CWE checks, bounded field sensitivity, recursive/destructured/callback taint propagation, lexical-shadowing regressions, TypeScript-annotation nullability seeding, path aliases, crash-proofing, completion status, registry coverage, baselines, stable SARIF fingerprints, suppressions, lattice tests, manifest-rule calibration regressions (launcher activities, scoped backup rules, debug overlays), Expo Router route and Podfile.lock native-consistency regressions, render-phase ref-access and unused-declaration (including nested-in-exported-component) regressions, React 19 upgrade regressions (removed ReactDOM APIs, createFactory, string refs, legacy context, function-component defaultProps, propTypes, useRef argument, use-in-try, ref-callback returns, test-utils, forwardRef), Fast Refresh mixed-exports regressions, and formatters.
+358 tests: logic, nullable arithmetic, numeric coercion, collection emptiness, switch control flow, React render-lifecycle state, async races, service response/resource handling, compiler-backed Promise semantics, multi-layer interprocedural and object-field flows, Expo/native, IaC, supply-chain configuration, backend/API correctness, persistent caching and scheduling, React/React Native correctness, reliability, CWE checks, path aliases, crash-proofing, registry coverage, baselines, stable SARIF fingerprints, suppressions, lattice tests, and formatters.
+
+### Logic-analysis boundary
+
+The verifier deliberately reports only mechanically supported invariants. It can prove value-flow, lifecycle, collection, Promise, and resource hazards represented by its rules and abstract domains; it cannot infer product-specific intent such as the correct fee percentage or allowed order-state transition. Encode those expectations as types, assertions, tests, or dedicated project rules. This false-positive bias keeps repository-scale scans actionable.
 
 `npm run benchmark` runs labeled vulnerable/fixed and mutation-style pairs, reports precision, recall, and F1, and fails below 95% precision or recall. The benchmark is a regression gate for its selected cases, not a claim of universal real-world accuracy.
 
