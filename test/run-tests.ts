@@ -1881,6 +1881,16 @@ async function runTests() {
     "LOGIC-004",
     "Guarded nullable arithmetic is clean",
   );
+  await expectFinding(
+    `const divisor = 0; export const ratio = 12 / divisor;`,
+    "LOGIC-005",
+    "Division by a constant zero is flagged",
+  );
+  await expectNoFinding(
+    `export function ratio(total: number, count: number) { if (count === 0) return 0; return total / count; }`,
+    "LOGIC-005",
+    "Guarded dynamic division is clean",
+  );
 
   console.log("— Hygiene Rules");
   await expectFinding(

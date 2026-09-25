@@ -142,4 +142,43 @@ export const NullableArithmeticRule: VerificationRule = {
   },
 };
 
-export const LOGIC_ANALYSIS_RULES: VerificationRule[] = [NullableArithmeticRule];
+function resolvesToNumericLiteral(path: NodePath<t.Expression>): number | null {
+  if (path.isNumericLiteral()) return path.node.value;
+  if (!path.isIdentifier()) return null;
+  const binding = path.scope.getBinding(path.node.name);
+  if (!binding?.constant || !binding.path.isVariableDeclarator()) return null;
+  const init = binding.path.get("init");
+  return init.isNumericLiteral() ? init.node.value : null;
+}
+
+export const DefiniteZeroDivisionRule: VerificationRule = {
+  id: "LOGIC-005",
+  name: "Definite Division by Zero",
+  description: "Detects division or remainder operations whose divisor is provably zero.",
+  category: "CORRECTNESS",
+  defaultSeverity: "HIGH",
+  check(ctx) {
+    traverse(ctx.ast, {
+      BinaryExpression(path) {
+        if (!["/", "%"].includes(path.node.operator)) return;
+        const right = path.get("right");
+        if (!right.isExpression() || resolvesToNumericLiteral(right) !== 0) return;
+        emit(
+          ctx,
+          right.node,
+          "LOGIC-005",
+          `The '${path.node.operator}' operation has a divisor of zero.`,
+          path.node.operator === "/"
+            ? "JavaScript returns Infinity or -Infinity instead of throwing, allowing an invalid number to spread through later calculations."
+            : "Remainder by zero evaluates to NaN and contaminates subsequent calculations.",
+          "Ensure the divisor is non-zero before performing the operation.",
+        );
+      },
+    });
+  },
+};
+
+export const LOGIC_ANALYSIS_RULES: VerificationRule[] = [
+  NullableArithmeticRule,
+  DefiniteZeroDivisionRule,
+];

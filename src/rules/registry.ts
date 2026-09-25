@@ -160,6 +160,11 @@ const METADATA: Record<string, MetadataFields> = {
     requirements: ["AST", "TYPE_INFORMATION"],
     frameworks: ["TYPESCRIPT", "REACT", "WEB", "REACT_NATIVE", "EXPO"],
   },
+  "LOGIC-005": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["TYPESCRIPT", "REACT", "WEB", "REACT_NATIVE", "EXPO"],
+  },
   "ASYNC-001": {
     confidence: "HIGH",
     requirements: ["AST"],
