@@ -190,6 +190,7 @@ export class CodeVerifier {
     const projectFunctionBehaviors = this.projectSummaryIndex?.behaviorsForFile(ast, filePath) ?? new Map();
     const projectSchemaTypes = this.projectUiIndex?.schemaTypesForFile(ast, filePath) ?? new Map();
     const projectStyleObjects = this.projectUiIndex?.styleObjectsForFile(ast, filePath) ?? new Map();
+    const projectComponentContracts = this.projectUiIndex?.componentContractsForFile(ast, filePath) ?? new Map();
     for (const [name, summary] of buildFunctionSummaries(ast, functionSummaries)) functionSummaries.set(name, summary);
     let truncatedCount = 0;
     let abstractAnalysisIncomplete = false;
@@ -269,6 +270,7 @@ export class CodeVerifier {
       projectFunctionBehaviors,
       projectSchemaTypes,
       projectStyleObjects,
+      projectComponentContracts,
       projectUiIndex: this.projectUiIndex,
       projectRoot: this.projectRoot,
       report: (d) => {

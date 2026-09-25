@@ -337,6 +337,18 @@ const METADATA: Record<string, MetadataFields> = {
   "STYLE-002": {
     confidence: "HIGH", requirements: ["AST", "PROJECT_CONTEXT"], frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
   },
+  "COMP-001": {
+    confidence: "HIGH", requirements: ["AST", "PROJECT_CONTEXT"], frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+  },
+  "COMP-002": {
+    confidence: "MEDIUM", requirements: ["AST", "PROJECT_CONTEXT"], frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+  },
+  "COMP-003": {
+    confidence: "HIGH", requirements: ["AST", "PROJECT_CONTEXT"], frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+  },
+  "COMP-004": {
+    confidence: "HIGH", requirements: ["AST"], frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
+  },
   "ASYNC-001": {
     confidence: "HIGH",
     requirements: ["AST"],

@@ -17,6 +17,7 @@ export * from './rules/logic-analysis-rules';
 export * from './rules/race-condition-rules';
 export * from './rules/server-state-rules';
 export * from './rules/form-style-rules';
+export * from './rules/component-contract-rules';
 export * from './rules/react-correctness-rules';
 export * from './rules/reliability-rules';
 export * from './rules/semantic-rules';

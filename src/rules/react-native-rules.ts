@@ -27,6 +27,7 @@ import { LOGIC_ANALYSIS_RULES } from "./logic-analysis-rules";
 import { RACE_CONDITION_RULES } from "./race-condition-rules";
 import { SERVER_STATE_RULES } from "./server-state-rules";
 import { FORM_STYLE_RULES } from "./form-style-rules";
+import { COMPONENT_CONTRACT_RULES } from "./component-contract-rules";
 
 // =========================================================================
 // 1. Insecure AsyncStorage for Sensitive Data (CWE-312)
@@ -1339,5 +1340,6 @@ export const ALL_RULES: VerificationRule[] = [
   ...RACE_CONDITION_RULES,
   ...SERVER_STATE_RULES,
   ...FORM_STYLE_RULES,
+  ...COMPONENT_CONTRACT_RULES,
   ...HYGIENE_RULES,
 ];

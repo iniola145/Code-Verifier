@@ -17,6 +17,19 @@ export interface StyleObjectFact {
   usedKeys: Set<string>;
 }
 
+export interface ComponentPropFact {
+  required: boolean;
+  callbackArity?: number;
+  callbackReturnsPromise?: boolean;
+  allowsNullish: boolean;
+}
+
+export interface ComponentContractFact {
+  sourceFile: string;
+  exportName: string;
+  props: Map<string, ComponentPropFact>;
+}
+
 interface CssFact {
   filePath: string;
   classes: Set<string>;
@@ -28,6 +41,7 @@ interface UiModule {
   ast: t.File;
   schemaTypes: Map<string, SchemaTypeFact>;
   styleObjects: Map<string, StyleObjectFact>;
+  componentContracts: Map<string, ComponentContractFact>;
   cssImports: CssFact[];
 }
 
@@ -59,6 +73,10 @@ export class ProjectUiIndex {
     return this.importedFacts(ast, filePath, "styleObjects");
   }
 
+  componentContractsForFile(ast: t.File, filePath: string): Map<string, ComponentContractFact> {
+    return this.importedFacts(ast, filePath, "componentContracts");
+  }
+
   definedStyleObjectsForFile(filePath: string): Map<string, StyleObjectFact> {
     return this.modules.get(path.resolve(filePath))?.styleObjects ?? new Map();
   }
@@ -83,7 +101,7 @@ export class ProjectUiIndex {
     return result;
   }
 
-  private importedFacts<T extends "schemaTypes" | "styleObjects">(
+  private importedFacts<T extends "schemaTypes" | "styleObjects" | "componentContracts">(
     ast: t.File,
     filePath: string,
     field: T,
@@ -111,11 +129,14 @@ export class ProjectUiIndex {
       const { ast } = parseSourceCode(code, filePath);
       const localSchemas = collectSchemaTypes(ast);
       const localStyles = collectStyleObjects(ast, filePath);
+      const localContracts = collectComponentContracts(ast, filePath);
       const schemaTypes = new Map<string, SchemaTypeFact>();
       const styleObjects = new Map<string, StyleObjectFact>();
+      const componentContracts = new Map<string, ComponentContractFact>();
       for (const [exported, local] of exportBindings(ast)) {
         if (localSchemas.has(local)) schemaTypes.set(exported, localSchemas.get(local)!);
         if (localStyles.has(local)) styleObjects.set(exported, { ...localStyles.get(local)!, exportName: exported });
+        if (localContracts.has(local)) componentContracts.set(exported, { ...localContracts.get(local)!, exportName: exported });
       }
       const cssImports: CssFact[] = [];
       for (const statement of ast.program.body) {
@@ -135,7 +156,7 @@ export class ProjectUiIndex {
           styleObjects.set(local, { sourceFile: cssPath, exportName: "default", keys: [...fact.classes], usedKeys: fact.usedClasses });
         }
       }
-      this.modules.set(filePath, { ast, schemaTypes, styleObjects, cssImports });
+      this.modules.set(filePath, { ast, schemaTypes, styleObjects, componentContracts, cssImports });
     } catch {
       // Normal file verification reports parse/read failures.
     }
@@ -151,6 +172,7 @@ export class ProjectUiIndex {
           if (!target) continue;
           for (const [name, fact] of target.schemaTypes) if (!module.schemaTypes.has(name)) { module.schemaTypes.set(name, fact); changed = true; }
           for (const [name, fact] of target.styleObjects) if (!module.styleObjects.has(name)) { module.styleObjects.set(name, fact); changed = true; }
+          for (const [name, fact] of target.componentContracts) if (!module.componentContracts.has(name)) { module.componentContracts.set(name, fact); changed = true; }
           continue;
         }
         if (!t.isExportNamedDeclaration(statement) || !statement.source) continue;
@@ -163,6 +185,7 @@ export class ProjectUiIndex {
           const exported = t.isIdentifier(specifier.exported) ? specifier.exported.name : specifier.exported.value;
           if (target.schemaTypes.has(imported) && !module.schemaTypes.has(exported)) { module.schemaTypes.set(exported, target.schemaTypes.get(imported)!); changed = true; }
           if (target.styleObjects.has(imported) && !module.styleObjects.has(exported)) { module.styleObjects.set(exported, target.styleObjects.get(imported)!); changed = true; }
+          if (target.componentContracts.has(imported) && !module.componentContracts.has(exported)) { module.componentContracts.set(exported, target.componentContracts.get(imported)!); changed = true; }
         }
       }
       if (!changed) break;
@@ -310,6 +333,106 @@ function collectSchemaTypes(ast: t.File): Map<string, SchemaTypeFact> {
   return result;
 }
 
+function collectComponentContracts(ast: t.File, filePath: string): Map<string, ComponentContractFact> {
+  const propTypes = new Map<string, Map<string, ComponentPropFact>>();
+  const result = new Map<string, ComponentContractFact>();
+  for (const statement of ast.program.body) {
+    const declaration = t.isExportNamedDeclaration(statement) ? statement.declaration : statement;
+    if (t.isTSInterfaceDeclaration(declaration) || (t.isTSTypeAliasDeclaration(declaration) && t.isTSTypeLiteral(declaration.typeAnnotation))) {
+      const name = declaration.id.name;
+      const members = t.isTSInterfaceDeclaration(declaration)
+        ? declaration.body.body
+        : t.isTSTypeAliasDeclaration(declaration) && t.isTSTypeLiteral(declaration.typeAnnotation)
+          ? declaration.typeAnnotation.members
+          : [];
+      const props = new Map<string, ComponentPropFact>();
+      for (const member of members) {
+        if (!t.isTSPropertySignature(member) || !member.typeAnnotation) continue;
+        const key = t.isIdentifier(member.key) ? member.key.name : t.isStringLiteral(member.key) ? member.key.value : null;
+        if (!key) continue;
+        const type = member.typeAnnotation.typeAnnotation;
+        const callback = t.isTSFunctionType(type) ? type : null;
+        props.set(key, {
+          required: !member.optional,
+          callbackArity: callback?.parameters.length,
+          callbackReturnsPromise: callback ? typeReturnsPromise(callback.typeAnnotation?.typeAnnotation) : undefined,
+          allowsNullish: member.optional || typeAllowsNullish(type),
+        });
+      }
+      propTypes.set(name, props);
+    }
+  }
+  const contractForType = (type: t.TSType | null | undefined): Map<string, ComponentPropFact> | null => {
+    if (!type) return null;
+    if (t.isTSTypeReference(type) && t.isIdentifier(type.typeName)) return propTypes.get(type.typeName.name) ?? null;
+    if (t.isTSTypeLiteral(type)) {
+      const props = new Map<string, ComponentPropFact>();
+      for (const member of type.members) if (t.isTSPropertySignature(member) && member.typeAnnotation) {
+        const key = t.isIdentifier(member.key) ? member.key.name : t.isStringLiteral(member.key) ? member.key.value : null;
+        if (!key) continue;
+        const propType = member.typeAnnotation.typeAnnotation;
+        const callback = t.isTSFunctionType(propType) ? propType : null;
+        props.set(key, { required: !member.optional, callbackArity: callback?.parameters.length,
+          callbackReturnsPromise: callback ? typeReturnsPromise(callback.typeAnnotation?.typeAnnotation) : undefined,
+          allowsNullish: member.optional || typeAllowsNullish(propType) });
+      }
+      return props;
+    }
+    return null;
+  };
+  const record = (name: string, props: Map<string, ComponentPropFact> | null): void => {
+    if (props) result.set(name, { sourceFile: filePath, exportName: name, props });
+  };
+  for (const statement of ast.program.body) {
+    const declaration = t.isExportNamedDeclaration(statement) || t.isExportDefaultDeclaration(statement) ? statement.declaration : statement;
+    if (t.isFunctionDeclaration(declaration) && declaration.id) {
+      const parameter = declaration.params[0];
+      const annotation = (t.isIdentifier(parameter) || t.isObjectPattern(parameter)) && t.isTSTypeAnnotation(parameter.typeAnnotation)
+        ? parameter.typeAnnotation.typeAnnotation : null;
+      record(declaration.id.name, contractForType(annotation));
+    }
+    if (t.isVariableDeclaration(declaration)) for (const item of declaration.declarations) {
+      if (!t.isIdentifier(item.id) || !(t.isArrowFunctionExpression(item.init) || t.isFunctionExpression(item.init))) continue;
+      let contract: Map<string, ComponentPropFact> | null = null;
+      const annotation = t.isTSTypeAnnotation(item.id.typeAnnotation) ? item.id.typeAnnotation.typeAnnotation : null;
+      if (t.isTSTypeReference(annotation) && t.isTSQualifiedName(annotation.typeName) &&
+        t.isIdentifier(annotation.typeName.right) && ["FC", "FunctionComponent"].includes(annotation.typeName.right.name)) {
+        contract = contractForType(annotation.typeParameters?.params[0]);
+      }
+      const parameter = item.init.params[0];
+      if (!contract && (t.isIdentifier(parameter) || t.isObjectPattern(parameter)) && t.isTSTypeAnnotation(parameter.typeAnnotation))
+        contract = contractForType(parameter.typeAnnotation.typeAnnotation);
+      record(item.id.name, contract);
+    }
+  }
+  // JavaScript/legacy React contracts: Component.propTypes = { value: T.isRequired }.
+  traverse(ast, {
+    AssignmentExpression(path) {
+      if (!t.isMemberExpression(path.node.left) || !t.isIdentifier(path.node.left.object) ||
+        !t.isIdentifier(path.node.left.property, { name: "propTypes" }) || !t.isObjectExpression(path.node.right)) return;
+      const props = new Map<string, ComponentPropFact>();
+      for (const property of path.node.right.properties) {
+        if (!t.isObjectProperty(property)) continue;
+        const key = t.isIdentifier(property.key) ? property.key.name : t.isStringLiteral(property.key) ? property.key.value : null;
+        if (!key) continue;
+        const required = t.isMemberExpression(property.value) && t.isIdentifier(property.value.property, { name: "isRequired" });
+        const text = property.value.start != null && property.value.end != null ? "" : "";
+        props.set(key, { required, allowsNullish: !required, callbackArity: /func/i.test(text) ? 0 : undefined });
+      }
+      record(path.node.left.object.name, props);
+    },
+  });
+  return result;
+}
+
+function typeReturnsPromise(type: t.TSType | null | undefined): boolean {
+  return !!type && t.isTSTypeReference(type) && t.isIdentifier(type.typeName, { name: "Promise" });
+}
+
+function typeAllowsNullish(type: t.TSType): boolean {
+  return t.isTSUnionType(type) && type.types.some((item) => t.isTSNullKeyword(item) || t.isTSUndefinedKeyword(item) || t.isTSVoidKeyword(item));
+}
+
 function collectStyleObjects(ast: t.File, filePath: string): Map<string, StyleObjectFact> {
   const result = new Map<string, StyleObjectFact>();
   for (const statement of ast.program.body) {
@@ -345,8 +468,14 @@ function exportBindings(ast: t.File): Array<[string, string]> {
       const declaration = statement.declaration;
       if (t.isVariableDeclaration(declaration)) for (const item of declaration.declarations) if (t.isIdentifier(item.id)) result.push([item.id.name, item.id.name]);
       if (t.isTSTypeAliasDeclaration(declaration)) result.push([declaration.id.name, declaration.id.name]);
-    } else if (t.isExportNamedDeclaration(statement) && !statement.source) for (const specifier of statement.specifiers) if (t.isExportSpecifier(specifier))
-      result.push([t.isIdentifier(specifier.exported) ? specifier.exported.name : specifier.exported.value, specifier.local.name]);
+      if (t.isFunctionDeclaration(declaration) && declaration.id) result.push([declaration.id.name, declaration.id.name]);
+    }
+    if (t.isExportNamedDeclaration(statement) && !statement.declaration && !statement.source) {
+      for (const specifier of statement.specifiers) if (t.isExportSpecifier(specifier))
+        result.push([t.isIdentifier(specifier.exported) ? specifier.exported.name : specifier.exported.value, specifier.local.name]);
+    }
+    if (t.isExportDefaultDeclaration(statement) && t.isFunctionDeclaration(statement.declaration) && statement.declaration.id)
+      result.push(["default", statement.declaration.id.name]);
   }
   return result;
 }

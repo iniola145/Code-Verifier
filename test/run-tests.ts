@@ -2307,7 +2307,26 @@ async function runTests() {
     assert(!css.diagnostics.some((d) => d.ruleId === "STYLE-001" && /legacy-hook/.test(d.message)), "Undefined plain class on an explicitly styled element stays quiet");
     assert(css.diagnostics.some((d) => d.ruleId === "STYLE-002" && /obsolete/.test(d.message)), "Unused CSS-module class is flagged");
     assert(!css.diagnostics.some((d) => d.ruleId === "STYLE-002" && /label/.test(d.message)), "Programmatic querySelector reference counts as CSS usage");
+
+    const badConsumer = await projectVerifier.verifyFile(path.join(fixtureRoot, "BadComponentConsumer.tsx"));
+    assert(badConsumer.diagnostics.some((d) => d.ruleId === "COMP-001" && /title/.test(d.message)), "Required prop missing through a barrel export is flagged");
+    assert(badConsumer.diagnostics.some((d) => d.ruleId === "COMP-002" && d.abstractInvariants?.["1.contract"]), "Async callback passed to a synchronous prop has an explainable proof trace");
+    assert(badConsumer.diagnostics.some((d) => d.ruleId === "COMP-003" && /user/.test(d.message)), "Explicit null passed to a non-nullable prop is flagged");
+    const safeConsumer = await projectVerifier.verifyFile(path.join(fixtureRoot, "SafeComponentConsumer.tsx"));
+    assert(!safeConsumer.diagnostics.some((d) => /^COMP-/.test(d.ruleId)), "Satisfied TypeScript component contracts remain clean");
+    const legacyConsumer = await projectVerifier.verifyFile(path.join(fixtureRoot, "LegacyConsumer.jsx"));
+    assert(legacyConsumer.diagnostics.some((d) => d.ruleId === "COMP-001" && /label/.test(d.message)), "Required JavaScript PropTypes prop is flagged");
   }
+  await expectFinding(
+    `function Field() { const [name, setName] = useState<string>(); return <input value={name} onChange={(event) => setName(event.target.value)} />; }`,
+    "COMP-004",
+    "Controlled input state initialized as undefined is flagged",
+  );
+  await expectNoFinding(
+    `function Field() { const [name, setName] = useState(''); return <input value={name} onChange={(event) => setName(event.target.value)} />; }`,
+    "COMP-004",
+    "Controlled input with a defined initial value remains clean",
+  );
   await expectNoFinding(
     `function Upload() { const [files] = useState([]); const handleSubmit = () => { if (files.length === 0) return; upload(files); }; return <button disabled={files.length === 0} onClick={handleSubmit}>Upload</button>; }`,
     "FORM-003",

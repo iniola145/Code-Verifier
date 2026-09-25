@@ -13,7 +13,7 @@ A static verification and security engine for **React, React Native, and Expo** 
      - **Nullability**: proves/flags actual null/undefined dereferences (CWE-476).
      - **Taint tracking**: source→sink flows from deep links, navigation params, and unencrypted storage into `AsyncStorage`/WebView sinks (CWE-312 / CWE-79).
      - **Interval domain**: numeric bounds with widening; used internally and surfaced in invariants.
-2. **Implemented TypeScript / React / React Native / Expo / Web Rules** (94 rules)
+2. **Implemented TypeScript / React / React Native / Expo / Web Rules** (127 rules)
    | Rule | Check | CWE |
    |---|---|---|
    | `RN-SEC-001` | Sensitive data in unencrypted `AsyncStorage` | CWE-312 |
@@ -75,6 +75,10 @@ A static verification and security engine for **React, React Native, and Expo** 
    | `REACT-024` | Async/timer callback derives a state update from a stale captured render value | React state |
    | `SERVICE-001` | Fetch response body consumed without checking `response.ok` or status | Service correctness |
    | `SERVICE-002` | Fetch abort timeout is never cleared after request completion | Resource lifecycle |
+   | `COMP-001` | Imported component rendered without a prop required by its TypeScript or JavaScript `propTypes` contract | Component contract |
+   | `COMP-002` | Async callback passed through a contract that hides Promise completion (LOW advisory) | Async component contract |
+   | `COMP-003` | Explicit `null`/`undefined` passed to a non-nullable imported component prop | Component contract |
+   | `COMP-004` | Controlled form value sourced from `useState()` initialized as undefined | React form lifecycle |
    | `HYG-002` | `const`/`let` or function declaration never referenced afterwards (or assigned but never read); exports, destructuring, and `_`-prefixed names exempt | Dead code |
    | `HYG-003` | Imported symbol (default, named, or namespace) never referenced in the importing file; side-effect imports, re-exports, type-only imports, and `_`-prefixed names exempt. A value import used only in type positions (e.g. `import { ViewStyle }` consumed as `: ViewStyle`) is also exempt — a syntax-only parse cannot soundly count those references | Dead code |
    | `HYG-004` | Source file that no other file in the project imports (orphaned dead file). Project-wide rule: builds an import graph with relative, `require()`, barrel re-export, and tsconfig `paths` alias resolution. Exempt: entry points (`App`, `index`, `main`, `_layout`), Expo Router `app/` / Next `pages/` routes, configs (`metro.config`, `babel.config`, jest, …), tests/stories/mocks, platform-suffixed files (`File.android.tsx`), `_`-prefixed Expo tooling entries, and `.mjs`/`.cjs` scripts | Dead code |
