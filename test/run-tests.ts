@@ -1972,6 +1972,9 @@ async function runTests() {
       `import { used } from "./api";\nexpect(used).toBe(1);\n`,
     );
     write("src/api.ts", `export const used = 1;\n`);
+    write("src/Widget.tsx", `export const Widget = () => null;\n`);
+    write("src/Widget.android.tsx", `export const Widget = () => null;\n`);
+    write("src/screen.ts", `import { Widget } from "./Widget";\nWidget();\n`);
     const index = ImportGraphIndex.fromFiles(
       expandAllFiles(dir),
     );
@@ -1983,6 +1986,11 @@ async function runTests() {
       "Orphaned file is not reachable",
       "lib/orphan.ts",
     );
+    assert(
+      reachable("src/Widget.android.tsx"),
+      "React Native platform variant is reachable through its extensionless import",
+      "src/Widget.android.tsx",
+    );
     assert(reachable("App.tsx"), "Entry point App.tsx is exempt");
     assert(reachable("app/profile.tsx"), "Expo Router route is exempt");
     assert(reachable("src/api.test.ts"), "Test file is exempt");
@@ -1990,6 +1998,47 @@ async function runTests() {
       reachable("src/api.ts"),
       "File imported only by a test file is reachable",
       "test import edge counts",
+    );
+    write(
+      "src/views/Bloom.tsx",
+      `export default function Bloom() { return null; }\n`,
+    );
+    write(
+      "src/views/Bloom.android.tsx",
+      `export default function Bloom() { return null; }\n`,
+    );
+    write(
+      "src/tooling/_fabric-native-components.jsx",
+      `export default {};`,
+    );
+    fs.writeFileSync(
+      path.join(dir, "tsconfig.json"),
+      JSON.stringify({ compilerOptions: { paths: { "@/*": ["./src/*"] } } }),
+    );
+    write(
+      "src/screens/Home.tsx",
+      `import { Bloom } from "@/views/Bloom";\nexport const H = Bloom;\n`,
+    );
+    const indexWithAliases = ImportGraphIndex.fromFiles(
+      expandAllFiles(dir),
+      dir,
+    );
+    const reachableWithAliases = (rel: string): boolean =>
+      indexWithAliases.isReachable(path.join(dir, rel));
+    assert(
+      reachableWithAliases("src/views/Bloom.tsx"),
+      "tsconfig alias import edge is resolved",
+      "alias resolution",
+    );
+    assert(
+      reachableWithAliases("src/views/Bloom.android.tsx"),
+      "Platform-suffixed sibling is exempt",
+      "platform file",
+    );
+    assert(
+      reachableWithAliases("src/tooling/_fabric-native-components.jsx"),
+      "Underscore-prefixed tooling entry is exempt",
+      "underscore entry",
     );
     fs.rmSync(dir, { recursive: true, force: true });
   }

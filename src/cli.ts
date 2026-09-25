@@ -291,7 +291,7 @@ Examples:
         severityOverrides: config.severities,
         projectSummaryIndex: ProjectSummaryIndex.fromFiles(allFiles),
         semanticAnalysisIndex: SemanticAnalysisIndex.fromFiles(allFiles),
-        importGraphIndex: ImportGraphIndex.fromFiles(allFiles),
+        importGraphIndex: ImportGraphIndex.fromFiles(allFiles, projectRoot),
         baselineFingerprints,
         failOn,
         projectRoot,

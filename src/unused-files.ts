@@ -15,6 +15,8 @@ const ENTRY_STEMS = new Set([
   "App",
   "app",
   "index",
+  "main",
+  "_layout",
   "metro.config",
   "babel.config",
   "tailwind.config",
@@ -46,6 +48,14 @@ function isExemptFile(file: string): boolean {
   const stem = ext ? base.slice(0, base.length - ext.length) : base;
   if (/\.(test|spec|stories|config|setup)$/.test(stem)) return true;
   if (ENTRY_STEMS.has(stem)) return true;
+  // Platform-specific variants (File.android.tsx etc.) are selected by the
+  // bundler from the base specifier, so the base import edge covers them.
+  if (/\.(android|ios|native|web)$/.test(stem)) return true;
+  // Standalone tooling scripts (.mjs/.cjs) are executed, not imported.
+  if (ext === ".mjs" || ext === ".cjs") return true;
+  // Expo convention: "_"-prefixed files are private framework entries
+  // (_layout, _fabric-native-components, ...) referenced by tooling.
+  if (stem.startsWith("_")) return true;
   const segments = file.split(/[\\/]/);
   return segments.some((seg) => EXEMPT_SEGMENTS.has(seg));
 }
@@ -61,13 +71,18 @@ export class ImportGraphIndex {
   /** Scanned file -> resolved absolute paths importing it. */
   private readonly importedBy: Map<string, Set<string>> = new Map();
   private readonly known: Set<string>;
+  /** Loaded tsconfig path mappings, e.g. "@/*" -> "<root>/src/*". */
+  private readonly aliasPatterns: { prefix: string; targets: string[] }[] = [];
 
-  private constructor(known: Set<string>) {
+  private constructor(known: Set<string>, projectRoot?: string) {
     this.known = known;
+    this.aliasPatterns = projectRoot
+      ? loadTsconfigPaths(projectRoot)
+      : [];
   }
 
-  static fromFiles(files: string[]): ImportGraphIndex {
-    const index = new ImportGraphIndex(new Set(files.map((f) => path.resolve(f))));
+  static fromFiles(files: string[], projectRoot?: string): ImportGraphIndex {
+    const index = new ImportGraphIndex(new Set(files.map((f) => path.resolve(f))), projectRoot);
     for (const importer of files) index.addFile(importer);
     for (const [file, targets] of index.imports) {
       for (const target of targets) {
@@ -90,7 +105,20 @@ export class ImportGraphIndex {
     const key = path.resolve(filePath);
     if (isExemptFile(key)) return true;
     const importers = this.importedBy.get(key);
-    return !!importers && importers.size > 0;
+    if (importers && importers.size > 0) return true;
+
+    // Metro resolves extensionless imports to platform-specific siblings at
+    // bundle time. If `./Widget` resolves to Widget.tsx in this syntax-only
+    // graph, Widget.android.tsx / Widget.ios.tsx are still live alternatives.
+    const platformMatch = key.match(/^(.*)\.(android|ios|native|web)(\.[^.]+)$/);
+    if (platformMatch) {
+      const base = platformMatch[1];
+      for (const ext of RESOLVE_EXTENSIONS) {
+        const baseImporters = this.importedBy.get(base + ext);
+        if (baseImporters && baseImporters.size > 0) return true;
+      }
+    }
+    return false;
   }
 
   /** Files that import the given file (diagnostic message support). */
@@ -148,8 +176,22 @@ export class ImportGraphIndex {
    * file set. Bare specifiers (packages) resolve to nothing.
    */
   private resolve(specifier: string, fromDir: string): string | null {
-    if (!specifier.startsWith(".") && !specifier.startsWith("/")) return null;
-    const base = path.resolve(fromDir, specifier);
+    if (specifier.startsWith(".") || specifier.startsWith("/")) {
+      return this.resolveRelative(path.resolve(fromDir, specifier));
+    }
+    for (const alias of this.aliasPatterns) {
+      if (!specifier.startsWith(alias.prefix)) continue;
+      for (const target of alias.targets) {
+        const base = path.resolve(target, specifier.slice(alias.prefix.length));
+        const hit = this.resolveRelative(base);
+        if (hit) return hit;
+      }
+    }
+    return null;
+  }
+
+  /** Node-style extension and index-file resolution against the scan set. */
+  private resolveRelative(base: string): string | null {
     if (this.known.has(base)) return base;
     for (const ext of RESOLVE_EXTENSIONS) {
       if (this.known.has(base + ext)) return base + ext;
@@ -160,4 +202,90 @@ export class ImportGraphIndex {
     }
     return null;
   }
+}
+
+/**
+ * Loads compilerOptions.paths from the project's tsconfig.json so aliased
+ * imports ("@/shared/utils") resolve like the bundler resolves them. Patterns
+ * are reduced to a literal prefix + target base pairs; only single-star
+ * patterns are handled, which covers the common "@/*" and "~/*" conventions.
+ */
+function loadTsconfigPaths(projectRoot: string): { prefix: string; targets: string[] }[] {
+  const patterns: { prefix: string; targets: string[] }[] = [];
+  const configPath = path.join(projectRoot, "tsconfig.json");
+  try {
+    const raw = fs.readFileSync(configPath, "utf-8");
+    const config = JSON.parse(stripJsonComments(raw));
+    const paths = config?.compilerOptions?.paths as
+      | Record<string, string[]>
+      | undefined;
+    if (!paths) return patterns;
+    for (const [pattern, targets] of Object.entries(paths)) {
+      const starIndex = pattern.indexOf("*");
+      const prefix = starIndex === -1 ? pattern : pattern.slice(0, starIndex);
+      const resolvedTargets = (targets as string[]).map((target) => {
+        const targetStar = target.indexOf("*");
+        const targetPrefix =
+          targetStar === -1 ? target : target.slice(0, targetStar);
+        return path.resolve(projectRoot, targetPrefix);
+      });
+      patterns.push({ prefix, targets: resolvedTargets });
+    }
+  } catch {
+    // No or unreadable tsconfig: aliased imports stay unresolved, which only
+    // risks missed edges, never a false "orphaned" verdict on its own.
+  }
+  return patterns;
+}
+
+/** Strips // and block comments so tsconfigs with comments parse. */
+function stripJsonComments(text: string): string {
+  let out = "";
+  let inString = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    const next = text[i + 1];
+    if (inLineComment) {
+      if (ch === "\n") {
+        inLineComment = false;
+        out += ch;
+      }
+      continue;
+    }
+    if (inBlockComment) {
+      if (ch === "*" && next === "/") {
+        inBlockComment = false;
+        i++;
+      }
+      continue;
+    }
+    if (inString) {
+      out += ch;
+      if (ch === "\\") {
+        out += next ?? "";
+        i++;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      inLineComment = true;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      inBlockComment = true;
+      i++;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
 }

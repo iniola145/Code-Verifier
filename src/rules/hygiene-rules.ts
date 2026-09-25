@@ -325,6 +325,18 @@ export const UnusedImportRule: VerificationRule = {
   defaultSeverity: "LOW",
   check: (ctx: RuleContext) => {
     const jsxNames = collectJsxIdentifierNames(ctx);
+    // Babel bindings do not count identifiers that occur only in TypeScript
+    // syntax (for example `Foo` in `value: Foo`). Keep a conservative set of
+    // every identifier nested beneath a TS node so those imports are not
+    // misreported as unused.
+    const typeNames = new Set<string>();
+    traverse(ctx.ast, {
+      Identifier(path) {
+        if (path.findParent((parent) => parent.node.type.startsWith("TS"))) {
+          typeNames.add(path.node.name);
+        }
+      },
+    });
     // `export { X } from "./y"` and `export * from "./y"` consume the source
     // module's bindings without local references, so treat those names as used.
     const reExportedNames = new Set<string>();
@@ -378,20 +390,28 @@ export const UnusedImportRule: VerificationRule = {
         const source = t.isStringLiteral(path.node.source)
           ? path.node.source.value
           : "";
-        // `import React from "react"` is exempt in files that contain JSX:
-        // whether the classic or automatic JSX runtime is in use is not
-        // visible to a syntax-only parse, so stay quiet.
+        // `import React from "react"` is exempt: whether the classic or
+        // automatic JSX runtime is in use is not visible to a syntax-only
+        // parse, so stay quiet on the React default import.
         const isReactDefault =
           /^react$/.test(source) &&
-          jsxNames.size > 0 &&
           path.node.specifiers.some(
             (s) => t.isImportDefaultSpecifier(s) && s.local.name === "React",
           );
         if (isReactDefault) return;
         for (const spec of path.node.specifiers) {
+          // Inline type specifiers (`import { type Foo }`) are exempt for the
+          // same reason as whole type-only imports: babel's reference counts
+          // miss type-annotation positions.
+          if (t.isImportSpecifier(spec) && spec.importKind === "type") continue;
           const name = spec.local.name;
           if (name.startsWith("_")) continue;
-          if (reExportedNames.has(name) || jsxNames.has(name)) continue;
+          if (
+            reExportedNames.has(name) ||
+            jsxNames.has(name) ||
+            typeNames.has(name)
+          )
+            continue;
           const binding = path.scope.getBinding(name);
           if (!binding || binding.references !== 0) continue;
           const kind = t.isImportDefaultSpecifier(spec)
