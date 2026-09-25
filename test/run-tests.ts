@@ -2094,6 +2094,68 @@ async function runTests() {
     "Ref-backed debounce timer is clean",
   );
 
+  console.log("— API and Server-State Correctness");
+  await expectFinding(
+    `function useReport(accountId: string, date: string) { return useQuery({ queryKey: ['report', accountId], queryFn: () => api.getReport(accountId, date) }); }`,
+    "QUERY-001",
+    "React Query key missing a request parameter is flagged",
+  );
+  await expectNoFinding(
+    `function useReport(accountId: string, date: string) { return useQuery({ queryKey: ['report', accountId, date], queryFn: () => api.getReport(accountId, date) }); }`,
+    "QUERY-001",
+    "React Query key with every request parameter is clean",
+  );
+  {
+    const result = await verifier.verifyCode(
+      `import axios from 'axios'; export const api = axios.create({ baseURL: '/api' });`,
+      "src/services/apiClient.ts",
+    );
+    assert(
+      result.diagnostics.some((d) => d.ruleId === "SERVICE-003"),
+      "Central Axios client without timeout is flagged",
+    );
+  }
+  {
+    const result = await verifier.verifyCode(
+      `import axios from 'axios'; export const api = axios.create({ baseURL: '/api', timeout: 15000 });`,
+      "src/services/apiClient.ts",
+    );
+    assert(
+      !result.diagnostics.some((d) => d.ruleId === "SERVICE-003"),
+      "Central Axios client with timeout is clean",
+    );
+  }
+  await expectFinding(
+    `async function login() { const response = await api.post('/login'); const user = response.data; if (import.meta.env.DEV) { UserSchema.safeParse(user); } return user; }`,
+    "SERVICE-004",
+    "Development-only response validation is flagged",
+  );
+  await expectNoFinding(
+    `async function login() { const response = await api.post('/login'); return UserSchema.parse(response.data); }`,
+    "SERVICE-004",
+    "Production response validation is clean",
+  );
+  {
+    const result = await verifier.verifyCode(
+      `export async function upload(file: File) { return axios.put('/upload', file); }`,
+      "src/services/uploadService.ts",
+    );
+    assert(
+      result.diagnostics.some((d) => d.ruleId === "SERVICE-005"),
+      "Upload without a file-size bound is flagged",
+    );
+  }
+  {
+    const result = await verifier.verifyCode(
+      `export async function upload(file: File) { if (file.size > 5_000_000) throw new Error('too large'); return axios.put('/upload', file); }`,
+      "src/services/uploadService.ts",
+    );
+    assert(
+      !result.diagnostics.some((d) => d.ruleId === "SERVICE-005"),
+      "Upload with a file-size bound is clean",
+    );
+  }
+
   console.log("— Hygiene Rules");
   await expectFinding(
     `<a href="https://x.com" target="_blank">go</a>`,

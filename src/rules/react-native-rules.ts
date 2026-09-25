@@ -25,6 +25,7 @@ import { EXPOROUTER_RULES } from "./expo-router-rules";
 import { NATIVE_CONSISTENCY_RULES } from "./native-consistency-rules";
 import { LOGIC_ANALYSIS_RULES } from "./logic-analysis-rules";
 import { RACE_CONDITION_RULES } from "./race-condition-rules";
+import { SERVER_STATE_RULES } from "./server-state-rules";
 
 // =========================================================================
 // 1. Insecure AsyncStorage for Sensitive Data (CWE-312)
@@ -1335,5 +1336,6 @@ export const ALL_RULES: VerificationRule[] = [
   ...NATIVE_CONSISTENCY_RULES,
   ...LOGIC_ANALYSIS_RULES,
   ...RACE_CONDITION_RULES,
+  ...SERVER_STATE_RULES,
   ...HYGIENE_RULES,
 ];

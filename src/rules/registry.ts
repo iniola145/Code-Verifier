@@ -245,6 +245,27 @@ const METADATA: Record<string, MetadataFields> = {
     requirements: ["AST"],
     frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
   },
+  "QUERY-001": {
+    confidence: "MEDIUM",
+    requirements: ["AST"],
+    frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+    documentationUrl: "https://tanstack.com/query/latest/docs/framework/react/guides/query-keys",
+  },
+  "SERVICE-003": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["TYPESCRIPT", "REACT", "WEB", "REACT_NATIVE", "EXPO"],
+  },
+  "SERVICE-004": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["TYPESCRIPT", "REACT", "WEB", "REACT_NATIVE", "EXPO"],
+  },
+  "SERVICE-005": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
+  },
   "ASYNC-001": {
     confidence: "HIGH",
     requirements: ["AST"],
