@@ -1865,6 +1865,23 @@ async function runTests() {
     "Guarded useState JSX is clean",
   );
 
+  console.log("— Deep Logic Analysis");
+  await expectFinding(
+    `function Price() { const [amount] = useState<number | null>(10); return amount - 2; }`,
+    "LOGIC-004",
+    "Nullable React state used in arithmetic is flagged",
+  );
+  await expectFinding(
+    `function total(amount: number | null, fee: number) { return amount - fee; }`,
+    "LOGIC-004",
+    "Nullable utility parameter used in arithmetic is flagged",
+  );
+  await expectNoFinding(
+    `function total(amount: number | null, fee: number) { if (amount == null) return 0; return amount - fee; }`,
+    "LOGIC-004",
+    "Guarded nullable arithmetic is clean",
+  );
+
   console.log("— Hygiene Rules");
   await expectFinding(
     `<a href="https://x.com" target="_blank">go</a>`,

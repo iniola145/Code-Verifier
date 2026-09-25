@@ -23,6 +23,7 @@ import { BACKEND_RULES } from "./backend-rules";
 import { DEPLOYMENT_RULES } from "./deployment-rules";
 import { EXPOROUTER_RULES } from "./expo-router-rules";
 import { NATIVE_CONSISTENCY_RULES } from "./native-consistency-rules";
+import { LOGIC_ANALYSIS_RULES } from "./logic-analysis-rules";
 
 // =========================================================================
 // 1. Insecure AsyncStorage for Sensitive Data (CWE-312)
@@ -1331,5 +1332,6 @@ export const ALL_RULES: VerificationRule[] = [
   ...DEPLOYMENT_RULES,
   ...EXPOROUTER_RULES,
   ...NATIVE_CONSISTENCY_RULES,
+  ...LOGIC_ANALYSIS_RULES,
   ...HYGIENE_RULES,
 ];
