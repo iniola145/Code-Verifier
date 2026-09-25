@@ -388,6 +388,46 @@ export const AccidentalSwitchFallthroughRule: VerificationRule = {
   },
 };
 
+function isHookCall(node: t.CallExpression, name: string): boolean {
+  return t.isIdentifier(node.callee, { name }) ||
+    (t.isMemberExpression(node.callee) && t.isIdentifier(node.callee.property, { name }));
+}
+
+export const EffectRequestRaceRule: VerificationRule = {
+  id: "REACT-022",
+  name: "Uncancelled Effect Request",
+  description: "Detects dependency-driven effects that fetch and update state without cleanup.",
+  category: "REACT_HOOKS",
+  defaultSeverity: "MEDIUM",
+  check(ctx) {
+    traverse(ctx.ast, {
+      CallExpression(path) {
+        if (!isHookCall(path.node, "useEffect")) return;
+        const callback = path.get("arguments.0");
+        const deps = path.node.arguments[1];
+        if ((!callback.isArrowFunctionExpression() && !callback.isFunctionExpression()) ||
+          !t.isBlockStatement(callback.node.body) || !t.isArrayExpression(deps) || deps.elements.length === 0) return;
+        let hasFetch = false;
+        let hasSetter = false;
+        let hasCleanup = false;
+        callback.traverse({
+          CallExpression(inner) {
+            if (t.isIdentifier(inner.node.callee, { name: "fetch" })) hasFetch = true;
+            if (t.isIdentifier(inner.node.callee) && /^set[A-Z]/.test(inner.node.callee.name)) hasSetter = true;
+          },
+          ReturnStatement(inner) {
+            if (t.isFunctionExpression(inner.node.argument) || t.isArrowFunctionExpression(inner.node.argument)) hasCleanup = true;
+          },
+        });
+        if (!hasFetch || !hasSetter || hasCleanup) return;
+        emit(ctx, path.node, "REACT-022", "An effect fetches data and updates state without cancellation cleanup.",
+          "When dependencies change, an older request can resolve last and overwrite newer state; it can also update after unmount.",
+          "Use AbortController or an ignore flag and return cleanup that invalidates the previous request.", "REACT_HOOKS", "MEDIUM");
+      },
+    });
+  },
+};
+
 export const LOGIC_ANALYSIS_RULES: VerificationRule[] = [
   NullableArithmeticRule,
   DefiniteZeroDivisionRule,
@@ -398,4 +438,5 @@ export const LOGIC_ANALYSIS_RULES: VerificationRule[] = [
   UnsafeArrayRemovalResultRule,
   EmptyReduceRule,
   AccidentalSwitchFallthroughRule,
+  EffectRequestRaceRule,
 ];

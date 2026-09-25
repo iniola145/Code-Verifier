@@ -1961,6 +1961,16 @@ async function runTests() {
     "LOGIC-011",
     "Terminated switch cases are clean",
   );
+  await expectFinding(
+    `function Search({ query }) { const [data, setData] = useState(null); useEffect(() => { fetch('/q=' + query).then(r => r.json()).then(setData); }, [query]); return null; }`,
+    "REACT-022",
+    "Dependency-driven fetch without cancellation is flagged",
+  );
+  await expectNoFinding(
+    `function Search({ query }) { const [data, setData] = useState(null); useEffect(() => { const c = new AbortController(); fetch('/q=' + query, { signal: c.signal }).then(r => r.json()).then(setData); return () => c.abort(); }, [query]); return null; }`,
+    "REACT-022",
+    "Effect request with cancellation cleanup is clean",
+  );
 
   console.log("— Hygiene Rules");
   await expectFinding(
