@@ -189,6 +189,23 @@ export class ProjectUiIndex {
           if (!t.isJSXIdentifier(path.node.name, { name: "className" }) || !t.isStringLiteral(path.node.value)) return;
           for (const name of path.node.value.value.split(/\s+/).filter(Boolean)) for (const css of cssFacts) css.usedClasses.add(name);
         },
+        CallExpression(path) {
+          const usage = classesFromDomCall(path.node);
+          if (usage === null) return;
+          if (usage === "dynamic") {
+            for (const css of cssFacts) for (const name of css.classes) css.usedClasses.add(name);
+            return;
+          }
+          for (const name of usage) for (const css of cssFacts) css.usedClasses.add(name);
+        },
+        AssignmentExpression(path) {
+          if (!t.isMemberExpression(path.node.left) || !t.isIdentifier(path.node.left.property, { name: "className" })) return;
+          if (!t.isStringLiteral(path.node.right)) {
+            for (const css of cssFacts) for (const name of css.classes) css.usedClasses.add(name);
+            return;
+          }
+          for (const name of path.node.right.value.split(/\s+/).filter(Boolean)) for (const css of cssFacts) css.usedClasses.add(name);
+        },
       });
     }
   }
@@ -231,6 +248,31 @@ export class ProjectUiIndex {
     }
     this.tsConfigs.sort((a, b) => b.directory.length - a.directory.length);
   }
+}
+
+export function classesFromDomCall(node: t.CallExpression): string[] | "dynamic" | null {
+  const callee = node.callee;
+  if (!t.isMemberExpression(callee) || !t.isIdentifier(callee.property)) return null;
+  const method = callee.property.name;
+  if (["querySelector", "querySelectorAll", "closest", "matches"].includes(method)) {
+    const selector = node.arguments[0];
+    if (!t.isStringLiteral(selector)) return "dynamic";
+    return [...selector.value.matchAll(/\.([_a-zA-Z]+[\w-]*)/g)].map((match) => match[1]);
+  }
+  if (method === "getElementsByClassName") {
+    const value = node.arguments[0];
+    return t.isStringLiteral(value) ? value.value.split(/\s+/).filter(Boolean) : "dynamic";
+  }
+  if (["add", "remove", "toggle", "replace", "contains"].includes(method) &&
+    t.isMemberExpression(callee.object) && t.isIdentifier(callee.object.property, { name: "classList" })) {
+    const values = node.arguments.filter(t.isStringLiteral).map((argument) => argument.value);
+    return values.length === node.arguments.length ? values : "dynamic";
+  }
+  if (method === "setAttribute" && t.isStringLiteral(node.arguments[0], { value: "class" })) {
+    const value = node.arguments[1];
+    return t.isStringLiteral(value) ? value.value.split(/\s+/).filter(Boolean) : "dynamic";
+  }
+  return null;
 }
 
 function thisCssFacts(module: UiModule, all: Map<string, CssFact>): CssFact[] {

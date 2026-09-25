@@ -3,6 +3,7 @@ import traverse, { NodePath } from "@babel/traverse";
 import * as t from "@babel/types";
 import { extractCodeSnippet, nodeToLocation } from "../parser/ast";
 import { RuleContext, VerificationRule } from "../types/verifier";
+import { classesFromDomCall } from "../project-ui-index";
 
 function emit(ctx: RuleContext, node: t.Node, ruleId: string, message: string, explanation: string, remediation: string, severity: "MEDIUM" | "LOW" = "MEDIUM"): void {
   const loc = nodeToLocation(node);
@@ -181,6 +182,13 @@ export const UndefinedStyleNameRule: VerificationRule = {
   check(ctx) {
     const facts = styleFacts(ctx);
     const cssClasses = ctx.projectUiIndex?.cssClassesForFile(ctx.filePath) ?? new Set<string>();
+    const reportMissingClasses = (node: t.Node, names: string[]): void => {
+      for (const name of names) {
+        if (/[:/[\]{}]/.test(name) || cssClasses.has(name)) continue;
+        emit(ctx, node, "STYLE-001", `CSS class '${name}' is used but no local definition was found.`,
+          "A misspelled or deleted selector silently removes the intended styling.", `Define '.${name}' in project CSS or correct/remove the class reference.`, "LOW");
+      }
+    };
     traverse(ctx.ast, {
       MemberExpression(path) {
         if (!t.isIdentifier(path.node.object)) return;
@@ -194,11 +202,17 @@ export const UndefinedStyleNameRule: VerificationRule = {
         if (cssClasses.size === 0 || !t.isJSXIdentifier(path.node.name, { name: "className" }) || !t.isStringLiteral(path.node.value)) return;
         if (path.parentPath.isJSXOpeningElement() && path.parentPath.node.attributes.some((attribute) =>
           t.isJSXAttribute(attribute) && t.isJSXIdentifier(attribute.name, { name: "style" }))) return;
-        for (const name of path.node.value.value.split(/\s+/).filter(Boolean)) {
-          if (/[:/[\]{}]/.test(name) || cssClasses.has(name)) continue;
-          emit(ctx, path.node, "STYLE-001", `CSS class '${name}' is used but no local definition was found.`,
-            "A misspelled or deleted selector silently removes the intended styling.", `Define '.${name}' in project CSS or correct/remove the className.`, "LOW");
-        }
+        reportMissingClasses(path.node, path.node.value.value.split(/\s+/).filter(Boolean));
+      },
+      CallExpression(path) {
+        if (cssClasses.size === 0) return;
+        const usage = classesFromDomCall(path.node);
+        if (usage && usage !== "dynamic") reportMissingClasses(path.node, usage);
+      },
+      AssignmentExpression(path) {
+        if (cssClasses.size === 0 || !t.isMemberExpression(path.node.left) ||
+          !t.isIdentifier(path.node.left.property, { name: "className" }) || !t.isStringLiteral(path.node.right)) return;
+        reportMissingClasses(path.node, path.node.right.value.split(/\s+/).filter(Boolean));
       },
     });
   },

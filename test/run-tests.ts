@@ -2303,8 +2303,10 @@ async function runTests() {
 
     const css = await projectVerifier.verifyFile(path.join(fixtureRoot, "CssCard.tsx"));
     assert(css.diagnostics.some((d) => d.ruleId === "STYLE-001" && /missing/.test(d.message)), "Undefined CSS-module class is flagged");
+    assert(css.diagnostics.some((d) => d.ruleId === "STYLE-001" && /ghost-query/.test(d.message)), "Undefined programmatic querySelector class is flagged");
     assert(!css.diagnostics.some((d) => d.ruleId === "STYLE-001" && /legacy-hook/.test(d.message)), "Undefined plain class on an explicitly styled element stays quiet");
     assert(css.diagnostics.some((d) => d.ruleId === "STYLE-002" && /obsolete/.test(d.message)), "Unused CSS-module class is flagged");
+    assert(!css.diagnostics.some((d) => d.ruleId === "STYLE-002" && /label/.test(d.message)), "Programmatic querySelector reference counts as CSS usage");
   }
   await expectNoFinding(
     `function Upload() { const [files] = useState([]); const handleSubmit = () => { if (files.length === 0) return; upload(files); }; return <button disabled={files.length === 0} onClick={handleSubmit}>Upload</button>; }`,
