@@ -394,7 +394,7 @@ const METADATA: Record<string, MetadataFields> = {
   },
   "HYG-004": {
     confidence: "MEDIUM",
-    requirements: ["PROJECT"],
+    requirements: ["PROJECT_CONTEXT"],
     frameworks: ["TYPESCRIPT", "REACT", "WEB", "REACT_NATIVE", "EXPO"],
   },
   "NET-001": {
