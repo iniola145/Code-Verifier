@@ -1901,6 +1901,16 @@ async function runTests() {
     "LOGIC-006",
     "Parsed number with explicit fallback is clean",
   );
+  await expectFinding(
+    `export const valid = (value: number) => value !== NaN;`,
+    "LOGIC-007",
+    "Equality comparison with NaN is flagged",
+  );
+  await expectNoFinding(
+    `export const valid = (value: number) => !Number.isNaN(value);`,
+    "LOGIC-007",
+    "Number.isNaN validation is clean",
+  );
 
   console.log("— Hygiene Rules");
   await expectFinding(

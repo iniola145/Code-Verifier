@@ -216,8 +216,36 @@ export const UncheckedNumericParseRule: VerificationRule = {
   },
 };
 
+export const InvalidNaNComparisonRule: VerificationRule = {
+  id: "LOGIC-007",
+  name: "Invalid NaN Comparison",
+  description: "Detects equality comparisons with NaN, which can never succeed.",
+  category: "CORRECTNESS",
+  defaultSeverity: "HIGH",
+  check(ctx) {
+    traverse(ctx.ast, {
+      BinaryExpression(path) {
+        if (!["==", "===", "!=", "!=="].includes(path.node.operator)) return;
+        const hasNaN =
+          t.isIdentifier(path.node.left, { name: "NaN" }) ||
+          t.isIdentifier(path.node.right, { name: "NaN" });
+        if (!hasNaN) return;
+        emit(
+          ctx,
+          path.node,
+          "LOGIC-007",
+          "NaN is compared using an equality operator.",
+          "NaN is unequal to every value, including itself, so this comparison is constant and cannot validate numeric input.",
+          "Use Number.isNaN(value), or Number.isFinite(value) when infinities are also invalid.",
+        );
+      },
+    });
+  },
+};
+
 export const LOGIC_ANALYSIS_RULES: VerificationRule[] = [
   NullableArithmeticRule,
   DefiniteZeroDivisionRule,
   UncheckedNumericParseRule,
+  InvalidNaNComparisonRule,
 ];
