@@ -2012,6 +2012,88 @@ async function runTests() {
     "Request abort timeout cleared in finally is clean",
   );
 
+  console.log("— Frontend and API Race Conditions");
+  await expectFinding(
+    `function load() { const controller = new AbortController(); fetch('/api'); return () => controller.abort(); }`,
+    "RACE-001",
+    "AbortController disconnected from fetch is flagged",
+  );
+  await expectNoFinding(
+    `function load() { const controller = new AbortController(); fetch('/api', { signal: controller.signal }); return () => controller.abort(); }`,
+    "RACE-001",
+    "AbortController wired to fetch is clean",
+  );
+  await expectFinding(
+    `function Search() { const [items, setItems] = useState([]); async function search(query: string) { const result = await api.search(query); setItems(result); } return null; }`,
+    "RACE-002",
+    "Parameterized request can overwrite newer state",
+  );
+  await expectNoFinding(
+    `function Search() { const [items, setItems] = useState([]); const requestId = useRef(0); async function search(query: string) { const id = ++requestId.current; const result = await api.search(query); if (id !== requestId.current) return; setItems(result); } return null; }`,
+    "RACE-002",
+    "Request generation guard is clean",
+  );
+  await expectFinding(
+    `async function increment() { const prior = await AsyncStorage.getItem('count'); await AsyncStorage.setItem('count', JSON.stringify(Number(prior) + 1)); }`,
+    "RACE-003",
+    "Storage read-modify-write race is flagged",
+  );
+  await expectNoFinding(
+    `async function replace(value: string) { await AsyncStorage.setItem('count', value); }`,
+    "RACE-003",
+    "Direct storage replacement is clean",
+  );
+  await expectFinding(
+    `function Screen() { const [loading, setLoading] = useState(false); async function refresh() { setLoading(true); try { await api.get('/items'); } finally { setLoading(false); } } return null; }`,
+    "RACE-004",
+    "Shared loading boolean around overlapping request is flagged",
+  );
+  await expectNoFinding(
+    `function Screen() { const [loading, setLoading] = useState(false); async function refresh() { if (loading) return; setLoading(true); try { await api.get('/items'); } finally { setLoading(false); } } return null; }`,
+    "RACE-004",
+    "Explicit loading guard is clean",
+  );
+  await expectFinding(
+    `function Screen() { useEffect(() => { AppState.addListener('change', refresh); }, []); return null; }`,
+    "RACE-005",
+    "Effect subscription without teardown is flagged",
+  );
+  await expectNoFinding(
+    `function Screen() { useEffect(() => { const sub = AppState.addListener('change', refresh); return () => sub.remove(); }, []); return null; }`,
+    "RACE-005",
+    "Effect subscription teardown is clean",
+  );
+  await expectFinding(
+    `async function load() { return Promise.race([fetch('/api'), new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1000))]); }`,
+    "RACE-006",
+    "Promise.race timeout without cancellation is flagged",
+  );
+  await expectNoFinding(
+    `async function load() { const controller = new AbortController(); return Promise.race([fetch('/api', { signal: controller.signal }), new Promise((_, reject) => setTimeout(() => { controller.abort(); reject(new Error('timeout')); }, 1000))]); }`,
+    "RACE-006",
+    "Promise.race timeout with abort is clean",
+  );
+  await expectFinding(
+    `function Cart() { const [items, setItems] = useState([]); async function remove(id: string) { const previous = items; setItems(items.filter(x => x.id !== id)); try { await api.delete('/items/' + id); } catch { setItems(previous); } } return null; }`,
+    "RACE-007",
+    "Unconditional optimistic rollback is flagged",
+  );
+  await expectNoFinding(
+    `function Cart() { const [items, setItems] = useState([]); async function remove(id: string) { setItems(items.filter(x => x.id !== id)); try { await api.delete('/items/' + id); } catch { refetch(); } } return null; }`,
+    "RACE-007",
+    "Refetch reconciliation avoids stale snapshot rollback",
+  );
+  await expectFinding(
+    `function Search() { useState(''); let timer = null; const change = (value: string) => { clearTimeout(timer); timer = setTimeout(() => search(value), 200); }; return null; }`,
+    "RACE-008",
+    "Render-local debounce timer is flagged",
+  );
+  await expectNoFinding(
+    `function Search() { useState(''); const timer = useRef(null); const change = (value: string) => { clearTimeout(timer.current); timer.current = setTimeout(() => search(value), 200); }; return null; }`,
+    "RACE-008",
+    "Ref-backed debounce timer is clean",
+  );
+
   console.log("— Hygiene Rules");
   await expectFinding(
     `<a href="https://x.com" target="_blank">go</a>`,

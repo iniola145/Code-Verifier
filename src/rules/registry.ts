@@ -205,6 +205,46 @@ const METADATA: Record<string, MetadataFields> = {
     requirements: ["AST"],
     frameworks: ["TYPESCRIPT", "REACT", "WEB", "REACT_NATIVE", "EXPO"],
   },
+  "RACE-001": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["TYPESCRIPT", "REACT", "WEB", "REACT_NATIVE", "EXPO"],
+  },
+  "RACE-002": {
+    confidence: "MEDIUM",
+    requirements: ["AST"],
+    frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+  },
+  "RACE-003": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["REACT_NATIVE", "EXPO", "WEB"],
+  },
+  "RACE-004": {
+    confidence: "MEDIUM",
+    requirements: ["AST"],
+    frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+  },
+  "RACE-005": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+  },
+  "RACE-006": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["TYPESCRIPT", "REACT", "WEB", "REACT_NATIVE", "EXPO"],
+  },
+  "RACE-007": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+  },
+  "RACE-008": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+  },
   "ASYNC-001": {
     confidence: "HIGH",
     requirements: ["AST"],
