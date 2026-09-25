@@ -504,6 +504,37 @@ export const StaleAsyncStateUpdateRule: VerificationRule = {
   },
 };
 
+export const UncheckedFetchResponseRule: VerificationRule = {
+  id: "SERVICE-001",
+  name: "Unchecked Fetch Response",
+  description: "Detects fetch responses consumed as JSON without checking HTTP success.",
+  category: "CORRECTNESS",
+  defaultSeverity: "MEDIUM",
+  check(ctx) {
+    traverse(ctx.ast, {
+      VariableDeclarator(path) {
+        if (!t.isIdentifier(path.node.id) || !t.isAwaitExpression(path.node.init) ||
+          !t.isCallExpression(path.node.init.argument) || !t.isIdentifier(path.node.init.argument.callee, { name: "fetch" })) return;
+        const name = path.node.id.name;
+        const scope = path.getFunctionParent() ?? path.scope.path;
+        let consumesBody = false;
+        let checksStatus = false;
+        scope.traverse({
+          MemberExpression(member) {
+            if (!t.isIdentifier(member.node.object, { name }) || !t.isIdentifier(member.node.property)) return;
+            if (["ok", "status", "statusText"].includes(member.node.property.name)) checksStatus = true;
+            if (["json", "text", "blob", "arrayBuffer", "formData"].includes(member.node.property.name) && member.parentPath.isCallExpression()) consumesBody = true;
+          },
+        });
+        if (!consumesBody || checksStatus) return;
+        emit(ctx, path.node, "SERVICE-001", `Fetch response '${name}' is consumed without checking HTTP status.`,
+          "fetch resolves normally for HTTP 4xx/5xx responses, so error payloads can be accepted as successful domain data.",
+          `Check '${name}.ok' or '${name}.status' before parsing and returning the response body.`, "CORRECTNESS", "MEDIUM");
+      },
+    });
+  },
+};
+
 export const LOGIC_ANALYSIS_RULES: VerificationRule[] = [
   NullableArithmeticRule,
   DefiniteZeroDivisionRule,
@@ -517,4 +548,5 @@ export const LOGIC_ANALYSIS_RULES: VerificationRule[] = [
   EffectRequestRaceRule,
   EffectTimerStateUpdateRule,
   StaleAsyncStateUpdateRule,
+  UncheckedFetchResponseRule,
 ];

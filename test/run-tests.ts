@@ -1991,6 +1991,16 @@ async function runTests() {
     "REACT-024",
     "Functional async state update is clean",
   );
+  await expectFinding(
+    `export async function load() { const response = await fetch('/api/items'); return response.json(); }`,
+    "SERVICE-001",
+    "Fetch body consumed without status check is flagged",
+  );
+  await expectNoFinding(
+    `export async function load() { const response = await fetch('/api/items'); if (!response.ok) throw new Error('failed'); return response.json(); }`,
+    "SERVICE-001",
+    "Fetch response checked before body consumption is clean",
+  );
 
   console.log("— Hygiene Rules");
   await expectFinding(
