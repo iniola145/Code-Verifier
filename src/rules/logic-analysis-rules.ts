@@ -319,6 +319,27 @@ export const UnsafeFindResultRule: VerificationRule = {
   },
 };
 
+export const UnsafeArrayRemovalResultRule: VerificationRule = {
+  id: "LOGIC-009",
+  name: "Unsafe Array Removal Result",
+  description: "Detects immediate dereference of pop/shift results that may be undefined.",
+  category: "CORRECTNESS",
+  defaultSeverity: "HIGH",
+  check(ctx) {
+    traverse(ctx.ast, {
+      MemberExpression(path) {
+        if (path.node.optional || !t.isCallExpression(path.node.object)) return;
+        const callee = path.node.object.callee;
+        if (!t.isMemberExpression(callee) || !t.isIdentifier(callee.property) ||
+          !["pop", "shift"].includes(callee.property.name)) return;
+        emit(ctx, path.node, "LOGIC-009", `A property is read directly from Array.${callee.property.name}().`,
+          `Array.${callee.property.name} returns undefined for an empty array, so this dereference can fail.`,
+          "Guard the removed value or use optional chaining before accessing its properties.");
+      },
+    });
+  },
+};
+
 export const LOGIC_ANALYSIS_RULES: VerificationRule[] = [
   NullableArithmeticRule,
   DefiniteZeroDivisionRule,
@@ -326,4 +347,5 @@ export const LOGIC_ANALYSIS_RULES: VerificationRule[] = [
   InvalidNaNComparisonRule,
   NullableStateLifecycleRule,
   UnsafeFindResultRule,
+  UnsafeArrayRemovalResultRule,
 ];

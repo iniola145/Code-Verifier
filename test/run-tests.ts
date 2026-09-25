@@ -1931,6 +1931,16 @@ async function runTests() {
     "LOGIC-008",
     "Optional Array.find result access is clean",
   );
+  await expectFinding(
+    `export const nextId = (queue: Job[]) => queue.shift().id;`,
+    "LOGIC-009",
+    "Immediate dereference of Array.shift result is flagged",
+  );
+  await expectNoFinding(
+    `export const nextId = (queue: Job[]) => queue.shift()?.id;`,
+    "LOGIC-009",
+    "Optional Array.shift result access is clean",
+  );
 
   console.log("— Hygiene Rules");
   await expectFinding(
