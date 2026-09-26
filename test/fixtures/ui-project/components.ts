@@ -1,1 +1,1 @@
-export { UserCard } from "./UserCard";
+export { PromiseUserCard, UserCard } from "./UserCard";

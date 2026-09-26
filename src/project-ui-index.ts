@@ -426,7 +426,9 @@ function collectComponentContracts(ast: t.File, filePath: string): Map<string, C
 }
 
 function typeReturnsPromise(type: t.TSType | null | undefined): boolean {
-  return !!type && t.isTSTypeReference(type) && t.isIdentifier(type.typeName, { name: "Promise" });
+  if (!type) return false;
+  if (t.isTSUnionType(type)) return type.types.some(typeReturnsPromise);
+  return t.isTSTypeReference(type) && t.isIdentifier(type.typeName, { name: "Promise" });
 }
 
 function typeAllowsNullish(type: t.TSType): boolean {

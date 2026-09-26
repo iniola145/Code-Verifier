@@ -2453,8 +2453,12 @@ async function runTests() {
     write("src/Widget.tsx", `export const Widget = () => null;\n`);
     write("src/Widget.android.tsx", `export const Widget = () => null;\n`);
     write("src/screen.ts", `import { Widget } from "./Widget";\nWidget();\n`);
+    write("server/mcp.ts", `export const serve = () => "mcp";\n`);
+    write("scripts/unreferenced.ts", `export const stale = true;\n`);
+    write("package.json", JSON.stringify({ scripts: { mcp: "tsx server/mcp.ts" } }));
     const index = ImportGraphIndex.fromFiles(
       expandAllFiles(dir),
+      dir,
     );
     const reachable = (rel: string): boolean =>
       index.isReachable(path.join(dir, rel));
@@ -2472,6 +2476,8 @@ async function runTests() {
     assert(reachable("App.tsx"), "Entry point App.tsx is exempt");
     assert(reachable("app/profile.tsx"), "Expo Router route is exempt");
     assert(reachable("src/api.test.ts"), "Test file is exempt");
+    assert(reachable("server/mcp.ts"), "package.json script target is an entry point");
+    assert(!reachable("scripts/unreferenced.ts"), "Unreferenced script-directory file is still orphaned");
     assert(
       reachable("src/api.ts"),
       "File imported only by a test file is reachable",

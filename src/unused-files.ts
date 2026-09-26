@@ -71,6 +71,8 @@ export class ImportGraphIndex {
   /** Scanned file -> resolved absolute paths importing it. */
   private readonly importedBy: Map<string, Set<string>> = new Map();
   private readonly known: Set<string>;
+  /** Files launched by package.json scripts/bin fields rather than imported. */
+  private readonly packageEntrypoints: Set<string> = new Set();
   /** Loaded tsconfig path mappings, e.g. "@/*" -> "<root>/src/*". */
   private readonly aliasPatterns: { prefix: string; targets: string[] }[] = [];
 
@@ -79,6 +81,7 @@ export class ImportGraphIndex {
     this.aliasPatterns = projectRoot
       ? loadTsconfigPaths(projectRoot)
       : [];
+    if (projectRoot) this.packageEntrypoints = loadPackageEntrypoints(projectRoot, known);
   }
 
   static fromFiles(files: string[], projectRoot?: string): ImportGraphIndex {
@@ -104,6 +107,7 @@ export class ImportGraphIndex {
   isReachable(filePath: string): boolean {
     const key = path.resolve(filePath);
     if (isExemptFile(key)) return true;
+    if (this.packageEntrypoints.has(key)) return true;
     const importers = this.importedBy.get(key);
     if (importers && importers.size > 0) return true;
 
@@ -202,6 +206,36 @@ export class ImportGraphIndex {
     }
     return null;
   }
+}
+
+/**
+ * Finds source files executed directly by package-manager scripts or exposed as
+ * package entry points. These files are roots of the project graph even though
+ * no source module imports them (for example `tsx server/mcp.ts`).
+ */
+function loadPackageEntrypoints(projectRoot: string, known: Set<string>): Set<string> {
+  const result = new Set<string>();
+  try {
+    const packageJson = JSON.parse(fs.readFileSync(path.join(projectRoot, "package.json"), "utf-8"));
+    const candidates: string[] = [];
+    if (packageJson.scripts && typeof packageJson.scripts === "object") {
+      for (const command of Object.values(packageJson.scripts)) if (typeof command === "string") {
+        for (const match of command.matchAll(/(?:^|[\s"'=])((?:\.\/)?[\w@./-]+\.(?:ts|tsx|js|jsx|mjs|cjs))(?=$|[\s"';&|])/g))
+          candidates.push(match[1]);
+      }
+    }
+    for (const field of [packageJson.main, packageJson.module]) if (typeof field === "string") candidates.push(field);
+    if (typeof packageJson.bin === "string") candidates.push(packageJson.bin);
+    else if (packageJson.bin && typeof packageJson.bin === "object")
+      for (const value of Object.values(packageJson.bin)) if (typeof value === "string") candidates.push(value);
+    for (const candidate of candidates) {
+      const resolved = path.resolve(projectRoot, candidate);
+      if (known.has(resolved)) result.add(resolved);
+    }
+  } catch {
+    // Missing or malformed package metadata cannot establish an entry point.
+  }
+  return result;
 }
 
 /**
