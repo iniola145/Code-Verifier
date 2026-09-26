@@ -2779,11 +2779,34 @@ async function runTests() {
         ?.severity === "MEDIUM",
       "Floating promises report at MEDIUM so idiomatic fire-and-forget stays advisory",
     );
-    assert(
-      semanticResult.checks.some(
+      assert(
+        semanticResult.checks.some(
         (check) => check.id === "type-semantics" && check.status === "PASSED",
       ),
       "TypeScript semantic stage is visible and complete",
+      );
+
+    const refreshFile = path.join(semanticRoot, "refresh.ts");
+    fs.writeFileSync(
+      refreshFile,
+      `let refreshPromise: Promise<boolean> | null = null;
+       declare function performRefresh(): Promise<boolean>;
+       function refreshAuth(): Promise<boolean> {
+         if (refreshPromise === null) {
+           refreshPromise = performRefresh().finally(() => { refreshPromise = null; }).catch(() => false);
+         }
+         return refreshPromise;
+       }
+       void refreshAuth();`,
+    );
+    const refreshVerifier = new CodeVerifier({
+      semanticAnalysisIndex: SemanticAnalysisIndex.fromFiles([refreshFile]),
+      projectRoot: semanticRoot,
+    });
+    const refreshResult = await refreshVerifier.verifyFile(refreshFile);
+    assert(
+      !refreshResult.diagnostics.some((d) => d.ruleId === "TYPE-001"),
+      "Promise rejection handling inside an assignment is recognized",
     );
 
     const reactNodeRoot = fs.mkdtempSync(
