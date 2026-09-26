@@ -64,15 +64,37 @@ export const MissingRequiredComponentPropRule: VerificationRule = {
   },
 };
 
-function isAsyncValue(path: any): boolean {
-  if (path.isArrowFunctionExpression() || path.isFunctionExpression()) return path.node.async;
+function functionHasPromiseWork(path: any): boolean {
+  if (!path.node.async) return false;
+  let found = false;
+  path.traverse({
+    Function(innerPath: any) {
+      if (innerPath.node !== path.node) innerPath.skip();
+    },
+    AwaitExpression(awaitPath: any) {
+      found = true;
+      awaitPath.stop();
+    },
+    ReturnStatement(returnPath: any) {
+      const argument = returnPath.node.argument;
+      if (t.isCallExpression(argument) || t.isNewExpression(argument)) {
+        found = true;
+        returnPath.stop();
+      }
+    },
+  });
+  return found;
+}
+
+function hasPromiseWork(path: any): boolean {
+  if (path.isArrowFunctionExpression() || path.isFunctionExpression()) return functionHasPromiseWork(path);
   if (!path.isIdentifier()) return false;
   const binding = path.scope.getBinding(path.node.name);
   if (!binding) return false;
-  if (binding.path.isFunctionDeclaration()) return binding.path.node.async;
+  if (binding.path.isFunctionDeclaration()) return functionHasPromiseWork(binding.path);
   if (binding.path.isVariableDeclarator()) {
     const init = binding.path.get("init");
-    return (init.isArrowFunctionExpression() || init.isFunctionExpression()) && init.node.async;
+    return (init.isArrowFunctionExpression() || init.isFunctionExpression()) && functionHasPromiseWork(init);
   }
   return false;
 }
@@ -96,7 +118,7 @@ export const AsyncCallbackToSyncPropRule: VerificationRule = {
           const fact = contract.props.get(prop);
           if (fact?.callbackReturnsPromise !== false) continue;
           const expression = attributePath.get("value.expression");
-          if (!isAsyncValue(expression)) continue;
+          if (!hasPromiseWork(expression)) continue;
           report(ctx, attributePath.node, "COMP-002", `Promise completion is hidden by prop '${prop}' on ${name}.`,
             "This is legal for void-returning callbacks and may be intentional, but the child contract cannot await completion or observe rejection. It can therefore close UI or report success while work is still pending.",
             `Change ${prop}'s contract to return Promise and await it, or handle errors entirely inside the callback.`, {
