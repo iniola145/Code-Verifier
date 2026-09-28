@@ -2495,9 +2495,21 @@ async function runTests() {
       "src/tooling/_fabric-native-components.jsx",
       `export default {};`,
     );
+    // Root tsconfig.json as a project-references shell, paths in the
+    // referenced app config (Vite-style) — the shell itself has no paths.
     fs.writeFileSync(
       path.join(dir, "tsconfig.json"),
-      JSON.stringify({ compilerOptions: { paths: { "@/*": ["./src/*"] } } }),
+      JSON.stringify({
+        files: [],
+        references: [{ path: "./tsconfig.app.json" }],
+      }),
+    );
+    fs.writeFileSync(
+      path.join(dir, "tsconfig.app.json"),
+      JSON.stringify({
+        compilerOptions: { paths: { "@/*": ["./src/*"] } },
+        include: ["src"],
+      }),
     );
     write(
       "src/screens/Home.tsx",
@@ -2511,8 +2523,8 @@ async function runTests() {
       indexWithAliases.isReachable(path.join(dir, rel));
     assert(
       reachableWithAliases("src/views/Bloom.tsx"),
-      "tsconfig alias import edge is resolved",
-      "alias resolution",
+      "tsconfig alias import edge is resolved (via project references)",
+      "alias resolution through references shell",
     );
     assert(
       reachableWithAliases("src/views/Bloom.android.tsx"),

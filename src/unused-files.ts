@@ -246,14 +246,49 @@ function loadPackageEntrypoints(projectRoot: string, known: Set<string>): Set<st
  */
 function loadTsconfigPaths(projectRoot: string): { prefix: string; targets: string[] }[] {
   const patterns: { prefix: string; targets: string[] }[] = [];
-  const configPath = path.join(projectRoot, "tsconfig.json");
+  const visited = new Set<string>();
+  collectTsconfigPaths(path.join(projectRoot, "tsconfig.json"), patterns, visited);
+  return patterns;
+}
+
+/**
+ * Recursively collects path mappings from a tsconfig and the configs it
+ * references or extends. Root tsconfig.json files in Vite/Expo projects are
+ * often just "references" shells with the real compilerOptions.paths in
+ * tsconfig.app.json / tsconfig.node.json, so following references is required
+ * for alias resolution there.
+ */
+function collectTsconfigPaths(
+  configPath: string,
+  patterns: { prefix: string; targets: string[] }[],
+  visited: Set<string>,
+): void {
+  const resolvedPath = path.resolve(configPath);
+  if (visited.has(resolvedPath)) return;
+  visited.add(resolvedPath);
+  let config: any;
   try {
-    const raw = fs.readFileSync(configPath, "utf-8");
-    const config = JSON.parse(stripJsonComments(raw));
-    const paths = config?.compilerOptions?.paths as
-      | Record<string, string[]>
-      | undefined;
-    if (!paths) return patterns;
+    config = JSON.parse(stripJsonComments(fs.readFileSync(resolvedPath, "utf-8")));
+  } catch {
+    return; // Unreadable configs simply contribute no mappings.
+  }
+  const compilerOptions = config?.compilerOptions ?? {};
+  const baseDir = path.dirname(resolvedPath);
+
+  // "extends": inherited paths apply, unless overridden locally.
+  if (typeof config.extends === "string") {
+    const extendsTarget = config.extends.endsWith(".json")
+      ? config.extends
+      : config.extends + ".json";
+    collectTsconfigPaths(
+      path.resolve(baseDir, extendsTarget),
+      patterns,
+      visited,
+    );
+  }
+
+  const paths = compilerOptions.paths as Record<string, string[]> | undefined;
+  if (paths) {
     for (const [pattern, targets] of Object.entries(paths)) {
       const starIndex = pattern.indexOf("*");
       const prefix = starIndex === -1 ? pattern : pattern.slice(0, starIndex);
@@ -261,15 +296,23 @@ function loadTsconfigPaths(projectRoot: string): { prefix: string; targets: stri
         const targetStar = target.indexOf("*");
         const targetPrefix =
           targetStar === -1 ? target : target.slice(0, targetStar);
-        return path.resolve(projectRoot, targetPrefix);
+        return path.resolve(baseDir, targetPrefix);
       });
       patterns.push({ prefix, targets: resolvedTargets });
     }
-  } catch {
-    // No or unreadable tsconfig: aliased imports stay unresolved, which only
-    // risks missed edges, never a false "orphaned" verdict on its own.
   }
-  return patterns;
+
+  // "references": project-references setups keep paths in each sub-config.
+  if (Array.isArray(config.references)) {
+    for (const ref of config.references) {
+      if (typeof ref?.path === "string") {
+        const refTarget = ref.path.endsWith(".json")
+          ? ref.path
+          : path.join(ref.path, "tsconfig.json");
+        collectTsconfigPaths(path.resolve(baseDir, refTarget), patterns, visited);
+      }
+    }
+  }
 }
 
 /** Strips // and block comments so tsconfigs with comments parse. */
