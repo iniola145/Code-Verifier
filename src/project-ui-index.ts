@@ -21,6 +21,7 @@ export interface ComponentPropFact {
   required: boolean;
   callbackArity?: number;
   callbackReturnsPromise?: boolean;
+  callbackReturnsVoid?: boolean;
   allowsNullish: boolean;
 }
 
@@ -356,6 +357,7 @@ function collectComponentContracts(ast: t.File, filePath: string): Map<string, C
           required: !member.optional,
           callbackArity: callback?.parameters.length,
           callbackReturnsPromise: callback ? typeReturnsPromise(callback.typeAnnotation?.typeAnnotation) : undefined,
+          callbackReturnsVoid: callback ? typeReturnsVoid(callback.typeAnnotation?.typeAnnotation) : undefined,
           allowsNullish: member.optional || typeAllowsNullish(type),
         });
       }
@@ -374,6 +376,7 @@ function collectComponentContracts(ast: t.File, filePath: string): Map<string, C
         const callback = t.isTSFunctionType(propType) ? propType : null;
         props.set(key, { required: !member.optional, callbackArity: callback?.parameters.length,
           callbackReturnsPromise: callback ? typeReturnsPromise(callback.typeAnnotation?.typeAnnotation) : undefined,
+          callbackReturnsVoid: callback ? typeReturnsVoid(callback.typeAnnotation?.typeAnnotation) : undefined,
           allowsNullish: member.optional || typeAllowsNullish(propType) });
       }
       return props;
@@ -429,6 +432,10 @@ function typeReturnsPromise(type: t.TSType | null | undefined): boolean {
   if (!type) return false;
   if (t.isTSUnionType(type)) return type.types.some(typeReturnsPromise);
   return t.isTSTypeReference(type) && t.isIdentifier(type.typeName, { name: "Promise" });
+}
+
+function typeReturnsVoid(type: t.TSType | null | undefined): boolean {
+  return !type || t.isTSVoidKeyword(type);
 }
 
 function typeAllowsNullish(type: t.TSType): boolean {

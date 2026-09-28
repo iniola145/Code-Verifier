@@ -1851,6 +1851,12 @@ async function runTests() {
   }`,
     "typeof-number early return proves surviving value non-null",
   );
+  await expectClean(
+    `function branchId(selectedBranch: { id: string } | null) {
+      return typeof selectedBranch?.id === 'string' ? selectedBranch.id : '';
+    }`,
+    "Optional-chain typeof guard proves the object non-null in the true branch",
+  );
   await expectFinding(
     `function C() {
   const [user] = useState<User | null>(null);

@@ -143,6 +143,14 @@ function refineExpression(
           // Any successful typeof comparison against a concrete runtime type
           // other than "undefined" proves the value is non-nullish.
           if (variable && equalityHolds) setNonNull(state, variable, symbols);
+          // `typeof obj?.field === 'string'` can only be true when the
+          // optional chain reached the field, so its object is non-null on
+          // the successful branch. This is the same safety guarantee as an
+          // explicit `obj != null` guard.
+          if (!variable && equalityHolds && isMemberLike(arg) && arg.optional) {
+            const base = baseIdentifierOf(arg);
+            if (base) setNonNull(state, base, symbols);
+          }
         }
       }
       return;

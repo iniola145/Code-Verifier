@@ -1,7 +1,7 @@
 export interface UserCardProps {
   title: string;
   user: { id: string; name: string };
-  onSave: (id: string) => void;
+  onSave: (id: string) => boolean;
   subtitle?: string | null;
 }
 

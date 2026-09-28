@@ -116,7 +116,7 @@ export const AsyncCallbackToSyncPropRule: VerificationRule = {
             !t.isJSXExpressionContainer(attributePath.node.value)) continue;
           const prop = attributePath.node.name.name;
           const fact = contract.props.get(prop);
-          if (fact?.callbackReturnsPromise !== false) continue;
+          if (!fact || fact.callbackReturnsPromise !== false || fact.callbackReturnsVoid) continue;
           const expression = attributePath.get("value.expression");
           if (!hasPromiseWork(expression)) continue;
           report(ctx, attributePath.node, "COMP-002", `Promise completion is hidden by prop '${prop}' on ${name}.`,
