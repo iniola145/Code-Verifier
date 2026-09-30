@@ -121,11 +121,15 @@ export class SemanticAnalysisIndex {
   }
 
   private hasRejectionHandler(node: ts.Expression): boolean {
-    if (ts.isParenthesizedExpression(node)) return this.hasRejectionHandler(node.expression);
+    if (ts.isParenthesizedExpression(node))
+      return this.hasRejectionHandler(node.expression);
     // An assignment expression can itself have Promise type even when the
     // assigned RHS is the expression that actually handles rejection, e.g.
     // `refreshPromise = performRefresh().finally(...).catch(...)`.
-    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken)
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken
+    )
       return this.hasRejectionHandler(node.right);
     if (
       !ts.isCallExpression(node) ||

@@ -6,7 +6,11 @@ export interface UserCardProps {
 }
 
 export function UserCard({ title, user, onSave, subtitle }: UserCardProps) {
-  return <button onClick={() => onSave(user.id)}>{title}: {user.name} {subtitle}</button>;
+  return (
+    <button onClick={() => onSave(user.id)}>
+      {title}: {user.name} {subtitle}
+    </button>
+  );
 }
 
 export interface PromiseUserCardProps {

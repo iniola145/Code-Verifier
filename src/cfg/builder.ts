@@ -1,5 +1,5 @@
-import * as t from '@babel/types';
-import { CFG, CFGNode, EdgeCondition } from '../types/verifier';
+import * as t from "@babel/types";
+import { CFG, CFGNode, EdgeCondition } from "../types/verifier";
 
 interface LoopContext {
   continueTarget: CFGNode;
@@ -21,7 +21,7 @@ export class CFGBuilder {
   /**
    * Builds a CFG for a statement list (function body or program body).
    */
-  public build(body: t.Statement[], name = '<module>'): CFG {
+  public build(body: t.Statement[], name = "<module>"): CFG {
     this.nextId = 0;
     this.nodes.clear();
     this.edgeConditions.clear();
@@ -75,7 +75,7 @@ export class CFGBuilder {
   private processStatements(
     stmts: t.Statement[],
     currentBlock: CFGNode,
-    exitNode: CFGNode
+    exitNode: CFGNode,
   ): CFGNode {
     let block = currentBlock;
 
@@ -99,24 +99,25 @@ export class CFGBuilder {
         this.addEdge(block, exitNode);
         // Unreachable continuation; still created so later statements are
         // recorded (they are also analyzed as unreachable).
-        block = this.createNode('AFTER_RETURN');
+        block = this.createNode("AFTER_RETURN");
       } else if (t.isThrowStatement(stmt)) {
         block.statements.push(stmt);
         this.addEdge(block, exitNode); // conservative: throw leaves the function
-        block = this.createNode('AFTER_THROW');
+        block = this.createNode("AFTER_THROW");
       } else if (t.isBreakStatement(stmt)) {
         const target = this.loopStack[this.loopStack.length - 1]?.breakTarget;
         if (target) {
           this.addEdge(block, target);
-          block = this.createNode('AFTER_BREAK');
+          block = this.createNode("AFTER_BREAK");
         } else {
           block.statements.push(stmt);
         }
       } else if (t.isContinueStatement(stmt)) {
-        const target = this.loopStack[this.loopStack.length - 1]?.continueTarget;
+        const target =
+          this.loopStack[this.loopStack.length - 1]?.continueTarget;
         if (target) {
           this.addEdge(block, target);
-          block = this.createNode('AFTER_CONTINUE');
+          block = this.createNode("AFTER_CONTINUE");
         } else {
           block.statements.push(stmt);
         }
@@ -129,7 +130,7 @@ export class CFGBuilder {
         block = this.processStatements(
           t.isBlockStatement(stmt.body) ? stmt.body.body : [stmt.body],
           block,
-          exitNode
+          exitNode,
         );
       } else {
         // Standard assignment, call, declaration, expression, etc.
@@ -142,9 +143,13 @@ export class CFGBuilder {
     return block;
   }
 
-  private processIf(stmt: t.IfStatement, currentBlock: CFGNode, exitNode: CFGNode): CFGNode {
-    const joinNode = this.createNode('IF_JOIN');
-    const thenNode = this.createNode('THEN_BRANCH');
+  private processIf(
+    stmt: t.IfStatement,
+    currentBlock: CFGNode,
+    exitNode: CFGNode,
+  ): CFGNode {
+    const joinNode = this.createNode("IF_JOIN");
+    const thenNode = this.createNode("THEN_BRANCH");
 
     this.addEdge(currentBlock, thenNode, { test: stmt.test, polarity: true });
 
@@ -155,31 +160,43 @@ export class CFGBuilder {
     this.addEdge(endThen, joinNode);
 
     if (stmt.alternate) {
-      const elseNode = this.createNode('ELSE_BRANCH');
-      this.addEdge(currentBlock, elseNode, { test: stmt.test, polarity: false });
+      const elseNode = this.createNode("ELSE_BRANCH");
+      this.addEdge(currentBlock, elseNode, {
+        test: stmt.test,
+        polarity: false,
+      });
       const elseStmts = t.isBlockStatement(stmt.alternate)
         ? stmt.alternate.body
         : [stmt.alternate];
       const endElse = this.processStatements(elseStmts, elseNode, exitNode);
       this.addEdge(endElse, joinNode);
     } else {
-      this.addEdge(currentBlock, joinNode, { test: stmt.test, polarity: false });
+      this.addEdge(currentBlock, joinNode, {
+        test: stmt.test,
+        polarity: false,
+      });
     }
 
     return joinNode;
   }
 
-  private processWhile(stmt: t.WhileStatement, currentBlock: CFGNode, exitNode: CFGNode): CFGNode {
-    const loopHeader = this.createNode('LOOP_HEADER', true);
-    const loopExit = this.createNode('LOOP_EXIT');
-    const bodyNode = this.createNode('LOOP_BODY');
+  private processWhile(
+    stmt: t.WhileStatement,
+    currentBlock: CFGNode,
+    exitNode: CFGNode,
+  ): CFGNode {
+    const loopHeader = this.createNode("LOOP_HEADER", true);
+    const loopExit = this.createNode("LOOP_EXIT");
+    const bodyNode = this.createNode("LOOP_BODY");
 
     this.addEdge(currentBlock, loopHeader);
     this.addEdge(loopHeader, bodyNode, { test: stmt.test, polarity: true });
     this.addEdge(loopHeader, loopExit, { test: stmt.test, polarity: false });
 
     this.loopStack.push({ continueTarget: loopHeader, breakTarget: loopExit });
-    const bodyStmts = t.isBlockStatement(stmt.body) ? stmt.body.body : [stmt.body];
+    const bodyStmts = t.isBlockStatement(stmt.body)
+      ? stmt.body.body
+      : [stmt.body];
     const endBody = this.processStatements(bodyStmts, bodyNode, exitNode);
     this.loopStack.pop();
 
@@ -187,15 +204,21 @@ export class CFGBuilder {
     return loopExit;
   }
 
-  private processDoWhile(stmt: t.DoWhileStatement, currentBlock: CFGNode, exitNode: CFGNode): CFGNode {
-    const bodyNode = this.createNode('DO_BODY');
-    const condNode = this.createNode('DO_COND', true);
-    const loopExit = this.createNode('LOOP_EXIT');
+  private processDoWhile(
+    stmt: t.DoWhileStatement,
+    currentBlock: CFGNode,
+    exitNode: CFGNode,
+  ): CFGNode {
+    const bodyNode = this.createNode("DO_BODY");
+    const condNode = this.createNode("DO_COND", true);
+    const loopExit = this.createNode("LOOP_EXIT");
 
     this.addEdge(currentBlock, bodyNode);
 
     this.loopStack.push({ continueTarget: condNode, breakTarget: loopExit });
-    const bodyStmts = t.isBlockStatement(stmt.body) ? stmt.body.body : [stmt.body];
+    const bodyStmts = t.isBlockStatement(stmt.body)
+      ? stmt.body.body
+      : [stmt.body];
     const endBody = this.processStatements(bodyStmts, bodyNode, exitNode);
     this.loopStack.pop();
 
@@ -205,7 +228,11 @@ export class CFGBuilder {
     return loopExit;
   }
 
-  private processFor(stmt: t.ForStatement, currentBlock: CFGNode, exitNode: CFGNode): CFGNode {
+  private processFor(
+    stmt: t.ForStatement,
+    currentBlock: CFGNode,
+    exitNode: CFGNode,
+  ): CFGNode {
     // `for (init; test; update)` — init executes once before the header,
     // update executes on every back-edge (the latch).
     let preheader = currentBlock;
@@ -213,16 +240,14 @@ export class CFGBuilder {
       if (t.isVariableDeclaration(stmt.init)) {
         preheader.statements.push(stmt.init);
       } else if (t.isExpression(stmt.init)) {
-        preheader.statements.push(
-          t.expressionStatement(stmt.init)
-        );
+        preheader.statements.push(t.expressionStatement(stmt.init));
       }
     }
 
-    const loopHeader = this.createNode('LOOP_HEADER', true);
-    const loopExit = this.createNode('LOOP_EXIT');
-    const bodyNode = this.createNode('LOOP_BODY');
-    const latchNode = this.createNode('LOOP_UPDATE');
+    const loopHeader = this.createNode("LOOP_HEADER", true);
+    const loopExit = this.createNode("LOOP_EXIT");
+    const bodyNode = this.createNode("LOOP_BODY");
+    const latchNode = this.createNode("LOOP_UPDATE");
 
     this.addEdge(preheader, loopHeader);
     if (stmt.test) {
@@ -234,7 +259,9 @@ export class CFGBuilder {
     }
 
     this.loopStack.push({ continueTarget: latchNode, breakTarget: loopExit });
-    const bodyStmts = t.isBlockStatement(stmt.body) ? stmt.body.body : [stmt.body];
+    const bodyStmts = t.isBlockStatement(stmt.body)
+      ? stmt.body.body
+      : [stmt.body];
     const endBody = this.processStatements(bodyStmts, bodyNode, exitNode);
     this.loopStack.pop();
 
@@ -250,11 +277,11 @@ export class CFGBuilder {
   private processForEach(
     stmt: t.ForOfStatement | t.ForInStatement,
     currentBlock: CFGNode,
-    exitNode: CFGNode
+    exitNode: CFGNode,
   ): CFGNode {
-    const loopHeader = this.createNode('LOOP_HEADER', true);
-    const loopExit = this.createNode('LOOP_EXIT');
-    const bodyNode = this.createNode('LOOP_BODY');
+    const loopHeader = this.createNode("LOOP_HEADER", true);
+    const loopExit = this.createNode("LOOP_EXIT");
+    const bodyNode = this.createNode("LOOP_BODY");
 
     this.addEdge(currentBlock, loopHeader);
     // Iteration count is unknown; no meaningful refinement on either edge.
@@ -262,7 +289,9 @@ export class CFGBuilder {
     this.addEdge(loopHeader, loopExit);
 
     this.loopStack.push({ continueTarget: loopHeader, breakTarget: loopExit });
-    const bodyStmts = t.isBlockStatement(stmt.body) ? stmt.body.body : [stmt.body];
+    const bodyStmts = t.isBlockStatement(stmt.body)
+      ? stmt.body.body
+      : [stmt.body];
     const endBody = this.processStatements(bodyStmts, bodyNode, exitNode);
     this.loopStack.pop();
 
@@ -270,15 +299,19 @@ export class CFGBuilder {
     return loopExit;
   }
 
-  private processSwitch(stmt: t.SwitchStatement, currentBlock: CFGNode, exitNode: CFGNode): CFGNode {
-    const breakTarget = this.createNode('SWITCH_EXIT');
+  private processSwitch(
+    stmt: t.SwitchStatement,
+    currentBlock: CFGNode,
+    exitNode: CFGNode,
+  ): CFGNode {
+    const breakTarget = this.createNode("SWITCH_EXIT");
     currentBlock.statements.push(stmt);
 
     const caseNodes: CFGNode[] = [];
     let defaultNode: CFGNode | undefined;
 
     for (const clause of stmt.cases) {
-      const node = this.createNode(clause.test ? 'CASE' : 'CASE_DEFAULT');
+      const node = this.createNode(clause.test ? "CASE" : "CASE_DEFAULT");
       node.statements.push(clause); // kept for statementStates bookkeeping
       if (clause.test) {
         // test expression evaluated, body lives in clause.consequent
@@ -297,7 +330,8 @@ export class CFGBuilder {
     // A `break` inside a case body already edges to breakTarget via the
     // loop/switch stack; nothing else is needed here.
     const prevStack = this.loopStack;
-    const enclosingContinue = prevStack[prevStack.length - 1]?.continueTarget ?? breakTarget;
+    const enclosingContinue =
+      prevStack[prevStack.length - 1]?.continueTarget ?? breakTarget;
     this.loopStack.push({ continueTarget: enclosingContinue, breakTarget });
     for (let i = 0; i < caseNodes.length; i++) {
       const clause = stmt.cases[i];
@@ -319,12 +353,18 @@ export class CFGBuilder {
     return breakTarget;
   }
 
-  private processTry(stmt: t.TryStatement, currentBlock: CFGNode, exitNode: CFGNode): CFGNode {
-    const bodyStmts = t.isBlockStatement(stmt.block) ? stmt.block.body : [stmt.block];
+  private processTry(
+    stmt: t.TryStatement,
+    currentBlock: CFGNode,
+    exitNode: CFGNode,
+  ): CFGNode {
+    const bodyStmts = t.isBlockStatement(stmt.block)
+      ? stmt.block.body
+      : [stmt.block];
     let afterBody = this.processStatements(bodyStmts, currentBlock, exitNode);
 
     if (stmt.handler) {
-      const catchNode = this.createNode('CATCH');
+      const catchNode = this.createNode("CATCH");
       const catchStmts = t.isBlockStatement(stmt.handler.body)
         ? stmt.handler.body.body
         : [stmt.handler.body];
@@ -334,8 +374,10 @@ export class CFGBuilder {
 
       let afterCatch = this.processStatements(catchStmts, catchNode, exitNode);
       if (stmt.finalizer) {
-        const finStmts = t.isBlockStatement(stmt.finalizer) ? stmt.finalizer.body : [stmt.finalizer];
-        const join = this.createNode('TRY_JOIN');
+        const finStmts = t.isBlockStatement(stmt.finalizer)
+          ? stmt.finalizer.body
+          : [stmt.finalizer];
+        const join = this.createNode("TRY_JOIN");
         this.addEdge(afterBody, join);
         this.addEdge(afterCatch, join);
         afterCatch = this.processStatements(finStmts, join, exitNode);
@@ -344,7 +386,9 @@ export class CFGBuilder {
     }
 
     if (stmt.finalizer) {
-      const finStmts = t.isBlockStatement(stmt.finalizer) ? stmt.finalizer.body : [stmt.finalizer];
+      const finStmts = t.isBlockStatement(stmt.finalizer)
+        ? stmt.finalizer.body
+        : [stmt.finalizer];
       return this.processStatements(finStmts, afterBody, exitNode);
     }
 

@@ -1,7 +1,12 @@
 import type { SymbolTable } from "../abstract-interpreter/symbols";
 import type { FunctionSummary } from "../abstract-interpreter/function-summaries";
 import type { ProjectFunctionBehavior } from "../abstract-interpreter/project-summaries";
-import type { ComponentContractFact, ProjectUiIndex, SchemaTypeFact, StyleObjectFact } from "../project-ui-index";
+import type {
+  ComponentContractFact,
+  ProjectUiIndex,
+  SchemaTypeFact,
+  StyleObjectFact,
+} from "../project-ui-index";
 
 export type DiagnosticCategory =
   | "SECURITY"
@@ -11,11 +16,7 @@ export type DiagnosticCategory =
   | "REACT_NATIVE_EXPO";
 
 export type DiagnosticSeverity =
-  | "CRITICAL"
-  | "HIGH"
-  | "MEDIUM"
-  | "LOW"
-  | "INFO";
+  "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "INFO";
 export type DiagnosticConfidence = "HIGH" | "MEDIUM" | "LOW";
 export type VerificationStatus = "PASSED" | "FAILED" | "INCOMPLETE";
 export type CheckStatus = "PASSED" | "FAILED" | "INCOMPLETE" | "SKIPPED";
@@ -26,11 +27,7 @@ export type AnalysisRequirement =
   | "TYPE_INFORMATION"
   | "PROJECT_CONTEXT";
 export type SupportedFramework =
-  | "TYPESCRIPT"
-  | "REACT"
-  | "WEB"
-  | "REACT_NATIVE"
-  | "EXPO";
+  "TYPESCRIPT" | "REACT" | "WEB" | "REACT_NATIVE" | "EXPO";
 
 export interface SourceLocation {
   line: number;

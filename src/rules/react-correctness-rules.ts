@@ -464,8 +464,7 @@ function latchStuckOnInterruption(
   refName: string,
 ): boolean {
   const callback = callbackPath.node as
-    | t.ArrowFunctionExpression
-    | t.FunctionExpression;
+    t.ArrowFunctionExpression | t.FunctionExpression;
   const params = firstCallbackParamNames(callback);
   const guards: t.IfStatement[] = [];
   callbackPath.traverse({
@@ -500,13 +499,11 @@ function latchStuckOnInterruption(
       )
         return;
       sawReset = true;
-      if (
-        !(
-          typeof guardEnd === "number" &&
-          typeof reset.start === "number" &&
-          reset.start > guardEnd
-        )
-      ) {
+      if (!(
+        typeof guardEnd === "number" &&
+        typeof reset.start === "number" &&
+        reset.start > guardEnd
+      )) {
         allResetsAfterGuard = false;
       }
     },
@@ -937,12 +934,14 @@ export const FastRefreshMixedExportsRule: VerificationRule = {
     traverse(ctx.ast, {
       FunctionDeclaration(path) {
         const id = path.node.id;
-        if (!id || !/^[A-Z]/.test(id.name) || !functionRendersJsx(path.node)) return;
+        if (!id || !/^[A-Z]/.test(id.name) || !functionRendersJsx(path.node))
+          return;
         if (atModuleScope(path)) componentDefs.add(id.name);
       },
       ClassDeclaration(path) {
         const id = path.node.id;
-        if (!id || !/^[A-Z]/.test(id.name) || !extendsReactComponent(path.node)) return;
+        if (!id || !/^[A-Z]/.test(id.name) || !extendsReactComponent(path.node))
+          return;
         if (atModuleScope(path)) componentDefs.add(id.name);
       },
       VariableDeclarator(path) {
@@ -1029,14 +1028,20 @@ export const FastRefreshMixedExportsRule: VerificationRule = {
             isHookName(exportedName)
           )
             continue;
-          const local = t.isIdentifier(spec.local) ? spec.local.name : exportedName;
+          const local = t.isIdentifier(spec.local)
+            ? spec.local.name
+            : exportedName;
           if (isTypeBinding(path, local)) continue;
           flag(spec, exportedName);
         }
       },
       ExportDefaultDeclaration(path) {
         const decl = path.node.declaration;
-        if (t.isTSInterfaceDeclaration(decl) || t.isTSTypeAliasDeclaration(decl)) return;
+        if (
+          t.isTSInterfaceDeclaration(decl) ||
+          t.isTSTypeAliasDeclaration(decl)
+        )
+          return;
         if (t.isFunction(decl)) {
           if (!functionRendersJsx(decl)) flag(decl, "default export");
           return;

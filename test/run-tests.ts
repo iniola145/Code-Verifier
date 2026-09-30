@@ -2167,14 +2167,20 @@ async function runTests() {
       `api.interceptors.response.use(ok => ok, async error => { if (error.response.status === 401) { const token = await refreshToken(); return api(error.config); } throw error; });`,
       "src/services/apiClient.ts",
     );
-    assert(result.diagnostics.some((d) => d.ruleId === "RACE-009"), "Uncoordinated auth refresh is flagged");
+    assert(
+      result.diagnostics.some((d) => d.ruleId === "RACE-009"),
+      "Uncoordinated auth refresh is flagged",
+    );
   }
   {
     const result = await verifier.verifyCode(
       `let refreshPromise: Promise<string> | null = null; api.interceptors.response.use(ok => ok, async error => { if (error.response.status === 401) { refreshPromise ??= refreshToken(); try { await refreshPromise; return api(error.config); } finally { refreshPromise = null; } } throw error; });`,
       "src/services/apiClient.ts",
     );
-    assert(!result.diagnostics.some((d) => d.ruleId === "RACE-009"), "Single-flight auth refresh is clean");
+    assert(
+      !result.diagnostics.some((d) => d.ruleId === "RACE-009"),
+      "Single-flight auth refresh is clean",
+    );
   }
   await expectFinding(
     `function useCreateOrder() { return useMutation({ mutationFn: (order) => api.post('/orders', order), retry: 3 }); }`,
@@ -2206,14 +2212,20 @@ async function runTests() {
       `export function enqueueOffline(payload) { queue.push({ method: 'post', payload }); }`,
       "src/offline/mutationQueue.ts",
     );
-    assert(result.diagnostics.some((d) => d.ruleId === "OFFLINE-001"), "Offline write without replay identity is flagged");
+    assert(
+      result.diagnostics.some((d) => d.ruleId === "OFFLINE-001"),
+      "Offline write without replay identity is flagged",
+    );
   }
   {
     const result = await verifier.verifyCode(
       `export function enqueueOffline(payload) { queue.push({ operationId: crypto.randomUUID(), method: 'post', payload }); }`,
       "src/offline/mutationQueue.ts",
     );
-    assert(!result.diagnostics.some((d) => d.ruleId === "OFFLINE-001"), "Offline write with replay identity is clean");
+    assert(
+      !result.diagnostics.some((d) => d.ruleId === "OFFLINE-001"),
+      "Offline write with replay identity is clean",
+    );
   }
   await expectFinding(
     `function usePrices(socket) { const [prices, setPrices] = useState({}); socket.onmessage = event => { setPrices(JSON.parse(event.data)); }; return prices; }`,
@@ -2270,58 +2282,169 @@ async function runTests() {
       `import { UserSchema } from './schemas'; export async function getUser() { const response = await api.get('/user'); return response.data; }`,
       "src/services/userApi.ts",
     );
-    assert(result.diagnostics.some((d) => d.ruleId === "SERVICE-006"), "Available response schema bypass is flagged");
+    assert(
+      result.diagnostics.some((d) => d.ruleId === "SERVICE-006"),
+      "Available response schema bypass is flagged",
+    );
   }
   {
     const result = await verifier.verifyCode(
       `import { UserSchema } from './schemas'; export async function getUser() { const response = await api.get('/user'); return UserSchema.parse(response.data); }`,
       "src/services/userApi.ts",
     );
-    assert(!result.diagnostics.some((d) => d.ruleId === "SERVICE-006"), "Response parsed with available schema is clean");
+    assert(
+      !result.diagnostics.some((d) => d.ruleId === "SERVICE-006"),
+      "Response parsed with available schema is clean",
+    );
   }
   {
     const fixtureRoot = path.resolve(__dirname, "fixtures/project-summaries");
     const helper = path.join(fixtureRoot, "coordinated-refresh.fixture");
     const consumer = path.join(fixtureRoot, "refresh-consumer.fixture");
-    const projectVerifier = new CodeVerifier({ projectSummaryIndex: ProjectSummaryIndex.fromFiles([helper, consumer]) });
+    const projectVerifier = new CodeVerifier({
+      projectSummaryIndex: ProjectSummaryIndex.fromFiles([helper, consumer]),
+    });
     const result = await projectVerifier.verifyFile(consumer);
-    assert(!result.diagnostics.some((d) => d.ruleId === "RACE-009"), "Imported single-flight refresh helper is recognized across files");
+    assert(
+      !result.diagnostics.some((d) => d.ruleId === "RACE-009"),
+      "Imported single-flight refresh helper is recognized across files",
+    );
   }
 
   console.log("— Form Contracts and Style Consistency");
   {
     const fixtureRoot = path.resolve(__dirname, "fixtures/ui-project");
     const files = expandAllFiles(fixtureRoot);
-    const projectVerifier = new CodeVerifier({ projectUiIndex: ProjectUiIndex.fromFiles(files), projectRoot: fixtureRoot });
-    const drawer = await projectVerifier.verifyFile(path.join(fixtureRoot, "BranchDrawer.tsx"));
-    assert(drawer.diagnostics.some((d) => d.ruleId === "FORM-001"), "Schema-derived form submitted without safeParse is flagged");
-    assert(drawer.diagnostics.some((d) => d.ruleId === "FORM-002" && /address/.test(d.message) && /area/.test(d.message)), "Partial manual validation names omitted required fields");
-    assert(drawer.diagnostics.some((d) => d.ruleId === "FORM-003"), "Silent form validation return is flagged");
-    assert(drawer.diagnostics.some((d) => d.ruleId === "FORM-004"), "Missing field-error propagation is flagged");
-    assert(drawer.diagnostics.some((d) => d.ruleId === "FORM-005"), "Closing immediately after submission is flagged");
-    const validDrawer = await projectVerifier.verifyFile(path.join(fixtureRoot, "BranchDrawerValid.tsx"));
-    assert(!validDrawer.diagnostics.some((d) => /^FORM-00[1-5]$/.test(d.ruleId)), "Schema validation, error propagation, and awaited submit remain clean");
+    const projectVerifier = new CodeVerifier({
+      projectUiIndex: ProjectUiIndex.fromFiles(files),
+      projectRoot: fixtureRoot,
+    });
+    const drawer = await projectVerifier.verifyFile(
+      path.join(fixtureRoot, "BranchDrawer.tsx"),
+    );
+    assert(
+      drawer.diagnostics.some((d) => d.ruleId === "FORM-001"),
+      "Schema-derived form submitted without safeParse is flagged",
+    );
+    assert(
+      drawer.diagnostics.some(
+        (d) =>
+          d.ruleId === "FORM-002" &&
+          /address/.test(d.message) &&
+          /area/.test(d.message),
+      ),
+      "Partial manual validation names omitted required fields",
+    );
+    assert(
+      drawer.diagnostics.some((d) => d.ruleId === "FORM-003"),
+      "Silent form validation return is flagged",
+    );
+    assert(
+      drawer.diagnostics.some((d) => d.ruleId === "FORM-004"),
+      "Missing field-error propagation is flagged",
+    );
+    assert(
+      drawer.diagnostics.some((d) => d.ruleId === "FORM-005"),
+      "Closing immediately after submission is flagged",
+    );
+    const validDrawer = await projectVerifier.verifyFile(
+      path.join(fixtureRoot, "BranchDrawerValid.tsx"),
+    );
+    assert(
+      !validDrawer.diagnostics.some((d) => /^FORM-00[1-5]$/.test(d.ruleId)),
+      "Schema validation, error propagation, and awaited submit remain clean",
+    );
 
-    const styled = await projectVerifier.verifyFile(path.join(fixtureRoot, "StyledCard.tsx"));
-    assert(styled.diagnostics.some((d) => d.ruleId === "STYLE-001" && /missing/.test(d.message)), "Undefined TypeScript style key is flagged");
-    const styleDefinition = await projectVerifier.verifyFile(path.join(fixtureRoot, "cardStyles.ts"));
-    assert(styleDefinition.diagnostics.some((d) => d.ruleId === "STYLE-002" && /obsolete/.test(d.message)), "Unused TypeScript style key is flagged");
+    const styled = await projectVerifier.verifyFile(
+      path.join(fixtureRoot, "StyledCard.tsx"),
+    );
+    assert(
+      styled.diagnostics.some(
+        (d) => d.ruleId === "STYLE-001" && /missing/.test(d.message),
+      ),
+      "Undefined TypeScript style key is flagged",
+    );
+    const styleDefinition = await projectVerifier.verifyFile(
+      path.join(fixtureRoot, "cardStyles.ts"),
+    );
+    assert(
+      styleDefinition.diagnostics.some(
+        (d) => d.ruleId === "STYLE-002" && /obsolete/.test(d.message),
+      ),
+      "Unused TypeScript style key is flagged",
+    );
 
-    const css = await projectVerifier.verifyFile(path.join(fixtureRoot, "CssCard.tsx"));
-    assert(css.diagnostics.some((d) => d.ruleId === "STYLE-001" && /missing/.test(d.message)), "Undefined CSS-module class is flagged");
-    assert(css.diagnostics.some((d) => d.ruleId === "STYLE-001" && /ghost-query/.test(d.message)), "Undefined programmatic querySelector class is flagged");
-    assert(!css.diagnostics.some((d) => d.ruleId === "STYLE-001" && /legacy-hook/.test(d.message)), "Undefined plain class on an explicitly styled element stays quiet");
-    assert(css.diagnostics.some((d) => d.ruleId === "STYLE-002" && /obsolete/.test(d.message)), "Unused CSS-module class is flagged");
-    assert(!css.diagnostics.some((d) => d.ruleId === "STYLE-002" && /label/.test(d.message)), "Programmatic querySelector reference counts as CSS usage");
+    const css = await projectVerifier.verifyFile(
+      path.join(fixtureRoot, "CssCard.tsx"),
+    );
+    assert(
+      css.diagnostics.some(
+        (d) => d.ruleId === "STYLE-001" && /missing/.test(d.message),
+      ),
+      "Undefined CSS-module class is flagged",
+    );
+    assert(
+      css.diagnostics.some(
+        (d) => d.ruleId === "STYLE-001" && /ghost-query/.test(d.message),
+      ),
+      "Undefined programmatic querySelector class is flagged",
+    );
+    assert(
+      !css.diagnostics.some(
+        (d) => d.ruleId === "STYLE-001" && /legacy-hook/.test(d.message),
+      ),
+      "Undefined plain class on an explicitly styled element stays quiet",
+    );
+    assert(
+      css.diagnostics.some(
+        (d) => d.ruleId === "STYLE-002" && /obsolete/.test(d.message),
+      ),
+      "Unused CSS-module class is flagged",
+    );
+    assert(
+      !css.diagnostics.some(
+        (d) => d.ruleId === "STYLE-002" && /label/.test(d.message),
+      ),
+      "Programmatic querySelector reference counts as CSS usage",
+    );
 
-    const badConsumer = await projectVerifier.verifyFile(path.join(fixtureRoot, "BadComponentConsumer.tsx"));
-    assert(badConsumer.diagnostics.some((d) => d.ruleId === "COMP-001" && /title/.test(d.message)), "Required prop missing through a barrel export is flagged");
-    assert(badConsumer.diagnostics.some((d) => d.ruleId === "COMP-002" && d.abstractInvariants?.["1.contract"]), "Async callback passed to a synchronous prop has an explainable proof trace");
-    assert(badConsumer.diagnostics.some((d) => d.ruleId === "COMP-003" && /user/.test(d.message)), "Explicit null passed to a non-nullable prop is flagged");
-    const safeConsumer = await projectVerifier.verifyFile(path.join(fixtureRoot, "SafeComponentConsumer.tsx"));
-    assert(!safeConsumer.diagnostics.some((d) => /^COMP-/.test(d.ruleId)), "Satisfied TypeScript component contracts remain clean");
-    const legacyConsumer = await projectVerifier.verifyFile(path.join(fixtureRoot, "LegacyConsumer.jsx"));
-    assert(legacyConsumer.diagnostics.some((d) => d.ruleId === "COMP-001" && /label/.test(d.message)), "Required JavaScript PropTypes prop is flagged");
+    const badConsumer = await projectVerifier.verifyFile(
+      path.join(fixtureRoot, "BadComponentConsumer.tsx"),
+    );
+    assert(
+      badConsumer.diagnostics.some(
+        (d) => d.ruleId === "COMP-001" && /title/.test(d.message),
+      ),
+      "Required prop missing through a barrel export is flagged",
+    );
+    assert(
+      badConsumer.diagnostics.some(
+        (d) => d.ruleId === "COMP-002" && d.abstractInvariants?.["1.contract"],
+      ),
+      "Async callback passed to a synchronous prop has an explainable proof trace",
+    );
+    assert(
+      badConsumer.diagnostics.some(
+        (d) => d.ruleId === "COMP-003" && /user/.test(d.message),
+      ),
+      "Explicit null passed to a non-nullable prop is flagged",
+    );
+    const safeConsumer = await projectVerifier.verifyFile(
+      path.join(fixtureRoot, "SafeComponentConsumer.tsx"),
+    );
+    assert(
+      !safeConsumer.diagnostics.some((d) => /^COMP-/.test(d.ruleId)),
+      "Satisfied TypeScript component contracts remain clean",
+    );
+    const legacyConsumer = await projectVerifier.verifyFile(
+      path.join(fixtureRoot, "LegacyConsumer.jsx"),
+    );
+    assert(
+      legacyConsumer.diagnostics.some(
+        (d) => d.ruleId === "COMP-001" && /label/.test(d.message),
+      ),
+      "Required JavaScript PropTypes prop is flagged",
+    );
   }
   await expectFinding(
     `function Field() { const [name, setName] = useState<string>(); return <input value={name} onChange={(event) => setName(event.target.value)} />; }`,
@@ -2461,14 +2584,28 @@ async function runTests() {
     write("src/screen.ts", `import { Widget } from "./Widget";\nWidget();\n`);
     write("server/mcp.ts", `export const serve = () => "mcp";\n`);
     write("scripts/unreferenced.ts", `export const stale = true;\n`);
-    write("package.json", JSON.stringify({ scripts: { mcp: "tsx server/mcp.ts" } }));
-    const index = ImportGraphIndex.fromFiles(
-      expandAllFiles(dir),
-      dir,
+    write(
+      "src/utils/index.ts",
+      `export * from "./used";\nexport * from "./dead";\n`,
     );
+    write("src/utils/used.ts", `export const live = 1;\n`);
+    write("src/utils/dead.ts", `export const dead = 1;\n`);
+    write(
+      "src/useUtils.ts",
+      `import { live } from "./utils";\nconsole.log(live);\n`,
+    );
+    write(
+      "package.json",
+      JSON.stringify({ scripts: { mcp: "tsx server/mcp.ts" } }),
+    );
+    const index = ImportGraphIndex.fromFiles(expandAllFiles(dir), dir);
     const reachable = (rel: string): boolean =>
       index.isReachable(path.join(dir, rel));
-    assert(reachable("lib/used.ts"), "Imported file is reachable", "lib/used.ts");
+    assert(
+      reachable("lib/used.ts"),
+      "Imported file is reachable",
+      "lib/used.ts",
+    );
     assert(
       !reachable("lib/orphan.ts"),
       "Orphaned file is not reachable",
@@ -2482,12 +2619,28 @@ async function runTests() {
     assert(reachable("App.tsx"), "Entry point App.tsx is exempt");
     assert(reachable("app/profile.tsx"), "Expo Router route is exempt");
     assert(reachable("src/api.test.ts"), "Test file is exempt");
-    assert(reachable("server/mcp.ts"), "package.json script target is an entry point");
-    assert(!reachable("scripts/unreferenced.ts"), "Unreferenced script-directory file is still orphaned");
+    assert(
+      reachable("server/mcp.ts"),
+      "package.json script target is an entry point",
+    );
+    assert(
+      !reachable("scripts/unreferenced.ts"),
+      "Unreferenced script-directory file is still orphaned",
+    );
     assert(
       reachable("src/api.ts"),
       "File imported only by a test file is reachable",
       "test import edge counts",
+    );
+    assert(
+      reachable("src/utils/used.ts"),
+      "Barrel re-exported file is reachable when its exported symbol is imported",
+      "used barrel export",
+    );
+    assert(
+      !reachable("src/utils/dead.ts"),
+      "Barrel-only file is orphaned when none of its exported symbols are imported",
+      "unused barrel export",
     );
     write(
       "src/views/Bloom.tsx",
@@ -2497,10 +2650,7 @@ async function runTests() {
       "src/views/Bloom.android.tsx",
       `export default function Bloom() { return null; }\n`,
     );
-    write(
-      "src/tooling/_fabric-native-components.jsx",
-      `export default {};`,
-    );
+    write("src/tooling/_fabric-native-components.jsx", `export default {};`);
     // Root tsconfig.json as a project-references shell, paths in the
     // referenced app config (Vite-style) — the shell itself has no paths.
     fs.writeFileSync(
@@ -2797,12 +2947,12 @@ async function runTests() {
         ?.severity === "MEDIUM",
       "Floating promises report at MEDIUM so idiomatic fire-and-forget stays advisory",
     );
-      assert(
-        semanticResult.checks.some(
+    assert(
+      semanticResult.checks.some(
         (check) => check.id === "type-semantics" && check.status === "PASSED",
       ),
       "TypeScript semantic stage is visible and complete",
-      );
+    );
 
     const refreshFile = path.join(semanticRoot, "refresh.ts");
     fs.writeFileSync(

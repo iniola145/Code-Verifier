@@ -205,11 +205,9 @@ export const SsrfRule: VerificationRule = {
     traverse(ctx.ast, {
       CallExpression(path) {
         const name = calleeName(path.node.callee);
-        if (
-          !(
-            name === "fetch" || /^(axios|http|https)\.(get|request)$/.test(name)
-          )
-        )
+        if (!(
+          name === "fetch" || /^(axios|http|https)\.(get|request)$/.test(name)
+        ))
           return;
         const url = path.node.arguments[0];
         if (t.isExpression(url) && isUntrusted(url, path))

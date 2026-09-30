@@ -1,6 +1,6 @@
-import * as readline from 'readline';
-import { CodeVerifier } from './engine';
-import { LLMFormatter } from './formatter/llm-formatter';
+import * as readline from "readline";
+import { CodeVerifier } from "./engine";
+import { LLMFormatter } from "./formatter/llm-formatter";
 
 /**
  * Lightweight JSON-RPC Model Context Protocol (MCP) Server
@@ -16,7 +16,7 @@ class MCPServer {
       terminal: false,
     });
 
-    rl.on('line', async (line) => {
+    rl.on("line", async (line) => {
       if (!line.trim()) return;
       try {
         const message = JSON.parse(line);
@@ -30,47 +30,49 @@ class MCPServer {
   private async handleMessage(msg: any): Promise<void> {
     const { id, method, params } = msg;
 
-    if (method === 'initialize') {
+    if (method === "initialize") {
       this.sendResponse(id, {
-        protocolVersion: '2024-11-05',
+        protocolVersion: "2024-11-05",
         capabilities: {
           tools: {},
         },
         serverInfo: {
-          name: 'code-verifier-mcp',
-          version: '1.0.0',
+          name: "code-verifier-mcp",
+          version: "1.0.0",
         },
       });
       return;
     }
 
-    if (method === 'tools/list') {
+    if (method === "tools/list") {
       this.sendResponse(id, {
         tools: [
           {
-            name: 'verify_code',
+            name: "verify_code",
             description:
-              'Verifies React, React Native, and Expo TypeScript code using SAST and Abstract Interpretation. Checks for security leaks (AsyncStorage, secrets, XSS in WebViews), React Hook violations (infinite re-render loops, conditional hooks), and null dereferences.',
+              "Verifies React, React Native, and Expo TypeScript code using SAST and Abstract Interpretation. Checks for security leaks (AsyncStorage, secrets, XSS in WebViews), React Hook violations (infinite re-render loops, conditional hooks), and null dereferences.",
             inputSchema: {
-              type: 'object',
+              type: "object",
               properties: {
                 code: {
-                  type: 'string',
-                  description: 'The TypeScript/TSX/JSX source code to verify',
+                  type: "string",
+                  description: "The TypeScript/TSX/JSX source code to verify",
                 },
                 filePath: {
-                  type: 'string',
-                  description: 'Optional filename (e.g. App.tsx, ProfileScreen.tsx)',
-                  default: 'Component.tsx',
+                  type: "string",
+                  description:
+                    "Optional filename (e.g. App.tsx, ProfileScreen.tsx)",
+                  default: "Component.tsx",
                 },
                 format: {
-                  type: 'string',
-                  enum: ['llm', 'json'],
-                  description: 'Format of diagnostic output (llm prompt markdown or raw json)',
-                  default: 'llm',
+                  type: "string",
+                  enum: ["llm", "json"],
+                  description:
+                    "Format of diagnostic output (llm prompt markdown or raw json)",
+                  default: "llm",
                 },
               },
-              required: ['code'],
+              required: ["code"],
             },
           },
         ],
@@ -78,36 +80,36 @@ class MCPServer {
       return;
     }
 
-    if (method === 'tools/call') {
+    if (method === "tools/call") {
       const toolName = params?.name;
       const args = params?.arguments || {};
 
-      if (toolName === 'verify_code') {
+      if (toolName === "verify_code") {
         const code = args.code;
-        const filePath = args.filePath || 'Component.tsx';
-        const format = args.format || 'llm';
+        const filePath = args.filePath || "Component.tsx";
+        const format = args.format || "llm";
 
         try {
           const result = await this.verifier.verifyCode(code, filePath);
           const outputText =
-            format === 'json'
+            format === "json"
               ? LLMFormatter.formatJSON(result)
               : LLMFormatter.formatForLLMPrompt(result);
 
           this.sendResponse(id, {
             content: [
               {
-                type: 'text',
+                type: "text",
                 text: outputText,
               },
             ],
-            isError: result.status !== 'PASSED',
+            isError: result.status !== "PASSED",
           });
         } catch (err: any) {
           this.sendResponse(id, {
             content: [
               {
-                type: 'text',
+                type: "text",
                 text: `Error verifying code: ${err.message}`,
               },
             ],
@@ -121,7 +123,7 @@ class MCPServer {
       return;
     }
 
-    if (method === 'ping') {
+    if (method === "ping") {
       this.sendResponse(id, {});
       return;
     }
@@ -134,20 +136,20 @@ class MCPServer {
 
   private sendResponse(id: any, result: any): void {
     const payload = {
-      jsonrpc: '2.0',
+      jsonrpc: "2.0",
       id,
       result,
     };
-    process.stdout.write(JSON.stringify(payload) + '\n');
+    process.stdout.write(JSON.stringify(payload) + "\n");
   }
 
   private sendError(id: any, code: number, message: string): void {
     const payload = {
-      jsonrpc: '2.0',
+      jsonrpc: "2.0",
       id,
       error: { code, message },
     };
-    process.stdout.write(JSON.stringify(payload) + '\n');
+    process.stdout.write(JSON.stringify(payload) + "\n");
   }
 }
 

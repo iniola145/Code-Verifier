@@ -70,6 +70,18 @@ export class ImportGraphIndex {
   private readonly imports: Map<string, Set<string>> = new Map();
   /** Scanned file -> resolved absolute paths importing it. */
   private readonly importedBy: Map<string, Set<string>> = new Map();
+  /** Scanned file -> resolved absolute paths it re-exports without local use. */
+  private readonly reExports: Map<string, Set<string>> = new Map();
+  /** Re-export target -> scanned files that re-export it. */
+  private readonly reExportedBy: Map<string, Set<string>> = new Map();
+  /** Re-exporter -> target -> exposed names; null means export-all. */
+  private readonly reExportedNames: Map<string, Map<string, Set<string> | null>> =
+    new Map();
+  /** Importer -> imported module -> imported names; null means whole module. */
+  private readonly importedNames: Map<string, Map<string, Set<string> | null>> =
+    new Map();
+  /** File -> top-level value export names. */
+  private readonly exportedNames: Map<string, Set<string>> = new Map();
   private readonly known: Set<string>;
   /** Files launched by package.json scripts/bin fields rather than imported. */
   private readonly packageEntrypoints: Set<string> = new Set();
@@ -78,14 +90,16 @@ export class ImportGraphIndex {
 
   private constructor(known: Set<string>, projectRoot?: string) {
     this.known = known;
-    this.aliasPatterns = projectRoot
-      ? loadTsconfigPaths(projectRoot)
-      : [];
-    if (projectRoot) this.packageEntrypoints = loadPackageEntrypoints(projectRoot, known);
+    this.aliasPatterns = projectRoot ? loadTsconfigPaths(projectRoot) : [];
+    if (projectRoot)
+      this.packageEntrypoints = loadPackageEntrypoints(projectRoot, known);
   }
 
   static fromFiles(files: string[], projectRoot?: string): ImportGraphIndex {
-    const index = new ImportGraphIndex(new Set(files.map((f) => path.resolve(f))), projectRoot);
+    const index = new ImportGraphIndex(
+      new Set(files.map((f) => path.resolve(f))),
+      projectRoot,
+    );
     for (const importer of files) index.addFile(importer);
     for (const [file, targets] of index.imports) {
       for (const target of targets) {
@@ -93,6 +107,16 @@ export class ImportGraphIndex {
         if (!set) {
           set = new Set();
           index.importedBy.set(target, set);
+        }
+        set.add(file);
+      }
+    }
+    for (const [file, targets] of index.reExports) {
+      for (const target of targets) {
+        let set = index.reExportedBy.get(target);
+        if (!set) {
+          set = new Set();
+          index.reExportedBy.set(target, set);
         }
         set.add(file);
       }
@@ -110,16 +134,21 @@ export class ImportGraphIndex {
     if (this.packageEntrypoints.has(key)) return true;
     const importers = this.importedBy.get(key);
     if (importers && importers.size > 0) return true;
+    if (this.isReachableThroughReExport(key, new Set(), null)) return true;
 
     // Metro resolves extensionless imports to platform-specific siblings at
     // bundle time. If `./Widget` resolves to Widget.tsx in this syntax-only
     // graph, Widget.android.tsx / Widget.ios.tsx are still live alternatives.
-    const platformMatch = key.match(/^(.*)\.(android|ios|native|web)(\.[^.]+)$/);
+    const platformMatch = key.match(
+      /^(.*)\.(android|ios|native|web)(\.[^.]+)$/,
+    );
     if (platformMatch) {
       const base = platformMatch[1];
       for (const ext of RESOLVE_EXTENSIONS) {
         const baseImporters = this.importedBy.get(base + ext);
         if (baseImporters && baseImporters.size > 0) return true;
+        if (this.isReachableThroughReExport(base + ext, new Set(), null))
+          return true;
       }
     }
     return false;
@@ -132,6 +161,7 @@ export class ImportGraphIndex {
   }
 
   private addFile(file: string): void {
+    const exports = new Set<string>();
     let code: string;
     try {
       code = fs.readFileSync(file, "utf-8");
@@ -146,32 +176,135 @@ export class ImportGraphIndex {
     }
     traverse(ast, {
       ImportDeclaration: (path) => {
-        this.recordImport(file, path.node.source.value);
+        this.recordImport(
+          file,
+          path.node.source.value,
+          importedNamesFrom(path.node),
+        );
       },
       ExportNamedDeclaration: (path) => {
-        if (path.node.source) this.recordImport(file, path.node.source.value);
+        if (path.node.source)
+          this.recordReExport(
+            file,
+            path.node.source.value,
+            reExportedNamesFrom(path.node),
+          );
+        else recordLocalExportNames(exports, path.node);
       },
       ExportAllDeclaration: (path) => {
-        if (path.node.source) this.recordImport(file, path.node.source.value);
+        if (path.node.source)
+          this.recordReExport(file, path.node.source.value, null);
+      },
+      ExportDefaultDeclaration: () => {
+        exports.add("default");
       },
       CallExpression: (path) => {
         const callee = path.node.callee;
         if (!t.isIdentifier(callee, { name: "require" })) return;
         const arg = path.node.arguments[0];
-        if (t.isStringLiteral(arg)) this.recordImport(file, arg.value);
+        if (t.isStringLiteral(arg)) this.recordImport(file, arg.value, null);
       },
     });
+    this.exportedNames.set(path.resolve(file), exports);
   }
 
-  private recordImport(file: string, specifier: string): void {
+  private recordImport(
+    file: string,
+    specifier: string,
+    names: Set<string> | null,
+  ): void {
     const target = this.resolve(specifier, path.dirname(file));
     if (!target) return;
-    let set = this.imports.get(file);
+    const key = path.resolve(file);
+    let set = this.imports.get(key);
     if (!set) {
       set = new Set();
-      this.imports.set(file, set);
+      this.imports.set(key, set);
     }
     set.add(target);
+
+    let byTarget = this.importedNames.get(key);
+    if (!byTarget) {
+      byTarget = new Map();
+      this.importedNames.set(key, byTarget);
+    }
+    const existing = byTarget.get(target);
+    if (existing === null || names === null) {
+      byTarget.set(target, null);
+      return;
+    }
+    if (!existing) byTarget.set(target, new Set(names));
+    else for (const name of names) existing.add(name);
+  }
+
+  private recordReExport(
+    file: string,
+    specifier: string,
+    names: Set<string> | null,
+  ): void {
+    const target = this.resolve(specifier, path.dirname(file));
+    if (!target) return;
+    const key = path.resolve(file);
+    let set = this.reExports.get(key);
+    if (!set) {
+      set = new Set();
+      this.reExports.set(key, set);
+    }
+    set.add(target);
+
+    let byTarget = this.reExportedNames.get(key);
+    if (!byTarget) {
+      byTarget = new Map();
+      this.reExportedNames.set(key, byTarget);
+    }
+    byTarget.set(target, names);
+  }
+
+  private isReachableThroughReExport(
+    file: string,
+    seen: Set<string>,
+    demandedNames: Set<string> | null,
+  ): boolean {
+    const key = path.resolve(file);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    const reExporters = this.reExportedBy.get(key);
+    if (!reExporters) return false;
+    for (const barrel of reExporters) {
+      const exposedNames = this.exposedNamesForReExport(barrel, key);
+      if (!namesCanSatisfy(exposedNames, demandedNames)) continue;
+      const directBarrelImporters = this.importedBy.get(barrel);
+      if (
+        directBarrelImporters &&
+        [...directBarrelImporters].some((importer) =>
+          this.importCanUseReExport(importer, barrel, exposedNames),
+        )
+      )
+        return true;
+      if (this.isReachableThroughReExport(barrel, seen, exposedNames))
+        return true;
+    }
+    return false;
+  }
+
+  private exposedNamesForReExport(
+    barrel: string,
+    target: string,
+  ): Set<string> | null {
+    const declared = this.reExportedNames.get(barrel)?.get(target);
+    if (declared !== null && declared !== undefined) return declared;
+    const targetExports = this.exportedNames.get(target);
+    return targetExports && targetExports.size > 0 ? targetExports : null;
+  }
+
+  private importCanUseReExport(
+    importer: string,
+    barrel: string,
+    exposedNames: Set<string> | null,
+  ): boolean {
+    const names = this.importedNames.get(importer)?.get(barrel);
+    if (names === null) return true;
+    return namesCanSatisfy(exposedNames, names ?? new Set());
   }
 
   /**
@@ -208,26 +341,98 @@ export class ImportGraphIndex {
   }
 }
 
+function importedNamesFrom(node: t.ImportDeclaration): Set<string> | null {
+  if (node.specifiers.length === 0) return null;
+  const names = new Set<string>();
+  for (const spec of node.specifiers) {
+    if (t.isImportSpecifier(spec)) {
+      if (t.isIdentifier(spec.imported)) names.add(spec.imported.name);
+      else names.add(spec.imported.value);
+    } else if (t.isImportDefaultSpecifier(spec)) {
+      names.add("default");
+    } else if (t.isImportNamespaceSpecifier(spec)) {
+      return null;
+    }
+  }
+  return names;
+}
+
+function reExportedNamesFrom(
+  node: t.ExportNamedDeclaration,
+): Set<string> | null {
+  const names = new Set<string>();
+  for (const spec of node.specifiers) {
+    if (!t.isExportSpecifier(spec)) continue;
+    if (t.isIdentifier(spec.exported)) names.add(spec.exported.name);
+    else names.add(spec.exported.value);
+  }
+  return names.size > 0 ? names : null;
+}
+
+function namesCanSatisfy(
+  exposedNames: Set<string> | null,
+  demandedNames: Set<string> | null,
+): boolean {
+  if (exposedNames === null || demandedNames === null) return true;
+  for (const name of demandedNames) if (exposedNames.has(name)) return true;
+  return false;
+}
+
+function recordLocalExportNames(
+  exports: Set<string>,
+  node: t.ExportNamedDeclaration,
+): void {
+  if (node.declaration) {
+    const declaration = node.declaration;
+    if (
+      (t.isFunctionDeclaration(declaration) ||
+        t.isClassDeclaration(declaration)) &&
+      declaration.id
+    )
+      exports.add(declaration.id.name);
+    if (t.isVariableDeclaration(declaration))
+      for (const item of declaration.declarations)
+        if (t.isIdentifier(item.id)) exports.add(item.id.name);
+    return;
+  }
+  for (const spec of node.specifiers) {
+    if (t.isExportSpecifier(spec)) {
+      if (t.isIdentifier(spec.exported)) exports.add(spec.exported.name);
+      else exports.add(spec.exported.value);
+    }
+  }
+}
+
 /**
  * Finds source files executed directly by package-manager scripts or exposed as
  * package entry points. These files are roots of the project graph even though
  * no source module imports them (for example `tsx server/mcp.ts`).
  */
-function loadPackageEntrypoints(projectRoot: string, known: Set<string>): Set<string> {
+function loadPackageEntrypoints(
+  projectRoot: string,
+  known: Set<string>,
+): Set<string> {
   const result = new Set<string>();
   try {
-    const packageJson = JSON.parse(fs.readFileSync(path.join(projectRoot, "package.json"), "utf-8"));
+    const packageJson = JSON.parse(
+      fs.readFileSync(path.join(projectRoot, "package.json"), "utf-8"),
+    );
     const candidates: string[] = [];
     if (packageJson.scripts && typeof packageJson.scripts === "object") {
-      for (const command of Object.values(packageJson.scripts)) if (typeof command === "string") {
-        for (const match of command.matchAll(/(?:^|[\s"'=])((?:\.\/)?[\w@./-]+\.(?:ts|tsx|js|jsx|mjs|cjs))(?=$|[\s"';&|])/g))
-          candidates.push(match[1]);
-      }
+      for (const command of Object.values(packageJson.scripts))
+        if (typeof command === "string") {
+          for (const match of command.matchAll(
+            /(?:^|[\s"'=])((?:\.\/)?[\w@./-]+\.(?:ts|tsx|js|jsx|mjs|cjs))(?=$|[\s"';&|])/g,
+          ))
+            candidates.push(match[1]);
+        }
     }
-    for (const field of [packageJson.main, packageJson.module]) if (typeof field === "string") candidates.push(field);
+    for (const field of [packageJson.main, packageJson.module])
+      if (typeof field === "string") candidates.push(field);
     if (typeof packageJson.bin === "string") candidates.push(packageJson.bin);
     else if (packageJson.bin && typeof packageJson.bin === "object")
-      for (const value of Object.values(packageJson.bin)) if (typeof value === "string") candidates.push(value);
+      for (const value of Object.values(packageJson.bin))
+        if (typeof value === "string") candidates.push(value);
     for (const candidate of candidates) {
       const resolved = path.resolve(projectRoot, candidate);
       if (known.has(resolved)) result.add(resolved);
@@ -244,10 +449,16 @@ function loadPackageEntrypoints(projectRoot: string, known: Set<string>): Set<st
  * are reduced to a literal prefix + target base pairs; only single-star
  * patterns are handled, which covers the common "@/*" and "~/*" conventions.
  */
-function loadTsconfigPaths(projectRoot: string): { prefix: string; targets: string[] }[] {
+function loadTsconfigPaths(
+  projectRoot: string,
+): { prefix: string; targets: string[] }[] {
   const patterns: { prefix: string; targets: string[] }[] = [];
   const visited = new Set<string>();
-  collectTsconfigPaths(path.join(projectRoot, "tsconfig.json"), patterns, visited);
+  collectTsconfigPaths(
+    path.join(projectRoot, "tsconfig.json"),
+    patterns,
+    visited,
+  );
   return patterns;
 }
 
@@ -268,7 +479,9 @@ function collectTsconfigPaths(
   visited.add(resolvedPath);
   let config: any;
   try {
-    config = JSON.parse(stripJsonComments(fs.readFileSync(resolvedPath, "utf-8")));
+    config = JSON.parse(
+      stripJsonComments(fs.readFileSync(resolvedPath, "utf-8")),
+    );
   } catch {
     return; // Unreadable configs simply contribute no mappings.
   }
@@ -309,7 +522,11 @@ function collectTsconfigPaths(
         const refTarget = ref.path.endsWith(".json")
           ? ref.path
           : path.join(ref.path, "tsconfig.json");
-        collectTsconfigPaths(path.resolve(baseDir, refTarget), patterns, visited);
+        collectTsconfigPaths(
+          path.resolve(baseDir, refTarget),
+          patterns,
+          visited,
+        );
       }
     }
   }

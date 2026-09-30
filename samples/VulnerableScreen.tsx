@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Button } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { WebView } from 'react-native-webview';
+import React, { useState, useEffect } from "react";
+import { View, Text, StyleSheet, Button } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { WebView } from "react-native-webview";
 
 const STRIPE_SECRET_KEY = "sk_live_938102938102938102938102";
 
@@ -16,7 +16,7 @@ export default function VulnerableScreen({ route }: any) {
 
   // Issue 2: Insecure storage for sensitive auth token
   const handleLogin = async (token: string) => {
-    await AsyncStorage.setItem('user_auth_token', token);
+    await AsyncStorage.setItem("user_auth_token", token);
   };
 
   // Issue 3: Null dereference on user (simulating dynamic/untyped data)
@@ -31,7 +31,7 @@ export default function VulnerableScreen({ route }: any) {
   return (
     <View style={styles.container}>
       <Text>Count: {count}</Text>
-      <Button title="Login" onPress={() => handleLogin('jwt_12345')} />
+      <Button title="Login" onPress={() => handleLogin("jwt_12345")} />
       {renderProfile()}
       <WebView source={{ html: userHtml }} />
     </View>

@@ -259,7 +259,8 @@ const METADATA: Record<string, MetadataFields> = {
     confidence: "MEDIUM",
     requirements: ["AST"],
     frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
-    documentationUrl: "https://tanstack.com/query/latest/docs/framework/react/guides/query-keys",
+    documentationUrl:
+      "https://tanstack.com/query/latest/docs/framework/react/guides/query-keys",
   },
   "QUERY-002": {
     confidence: "HIGH",
@@ -317,37 +318,59 @@ const METADATA: Record<string, MetadataFields> = {
     frameworks: ["TYPESCRIPT", "REACT", "WEB", "REACT_NATIVE", "EXPO"],
   },
   "FORM-001": {
-    confidence: "HIGH", requirements: ["AST", "PROJECT_CONTEXT"], frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+    confidence: "HIGH",
+    requirements: ["AST", "PROJECT_CONTEXT"],
+    frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
   },
   "FORM-002": {
-    confidence: "HIGH", requirements: ["AST", "PROJECT_CONTEXT"], frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+    confidence: "HIGH",
+    requirements: ["AST", "PROJECT_CONTEXT"],
+    frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
   },
   "FORM-003": {
-    confidence: "HIGH", requirements: ["AST"], frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
   },
   "FORM-004": {
-    confidence: "MEDIUM", requirements: ["AST", "PROJECT_CONTEXT"], frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+    confidence: "MEDIUM",
+    requirements: ["AST", "PROJECT_CONTEXT"],
+    frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
   },
   "FORM-005": {
-    confidence: "MEDIUM", requirements: ["AST"], frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+    confidence: "MEDIUM",
+    requirements: ["AST"],
+    frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
   },
   "STYLE-001": {
-    confidence: "HIGH", requirements: ["AST", "PROJECT_CONTEXT"], frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
+    confidence: "HIGH",
+    requirements: ["AST", "PROJECT_CONTEXT"],
+    frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
   },
   "STYLE-002": {
-    confidence: "HIGH", requirements: ["AST", "PROJECT_CONTEXT"], frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
+    confidence: "HIGH",
+    requirements: ["AST", "PROJECT_CONTEXT"],
+    frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
   },
   "COMP-001": {
-    confidence: "HIGH", requirements: ["AST", "PROJECT_CONTEXT"], frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+    confidence: "HIGH",
+    requirements: ["AST", "PROJECT_CONTEXT"],
+    frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
   },
   "COMP-002": {
-    confidence: "MEDIUM", requirements: ["AST", "PROJECT_CONTEXT"], frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+    confidence: "MEDIUM",
+    requirements: ["AST", "PROJECT_CONTEXT"],
+    frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
   },
   "COMP-003": {
-    confidence: "HIGH", requirements: ["AST", "PROJECT_CONTEXT"], frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
+    confidence: "HIGH",
+    requirements: ["AST", "PROJECT_CONTEXT"],
+    frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
   },
   "COMP-004": {
-    confidence: "HIGH", requirements: ["AST"], frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
   },
   "ASYNC-001": {
     confidence: "HIGH",
@@ -618,67 +641,78 @@ const METADATA: Record<string, MetadataFields> = {
     confidence: "HIGH",
     requirements: ["AST"],
     frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
-    documentationUrl: "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
+    documentationUrl:
+      "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
   },
   "REACT-010": {
     confidence: "HIGH",
     requirements: ["AST"],
     frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
-    documentationUrl: "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
+    documentationUrl:
+      "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
   },
   "REACT-011": {
     confidence: "HIGH",
     requirements: ["AST"],
     frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
-    documentationUrl: "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
+    documentationUrl:
+      "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
   },
   "REACT-012": {
     confidence: "HIGH",
     requirements: ["AST"],
     frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
-    documentationUrl: "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
+    documentationUrl:
+      "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
   },
   "REACT-013": {
     confidence: "HIGH",
     requirements: ["AST"],
     frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
-    documentationUrl: "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
+    documentationUrl:
+      "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
   },
   "REACT-014": {
     confidence: "HIGH",
     requirements: ["AST"],
     frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
-    documentationUrl: "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
+    documentationUrl:
+      "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
   },
   "REACT-015": {
     confidence: "HIGH",
     requirements: ["AST"],
     frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
-    documentationUrl: "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
+    documentationUrl:
+      "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
   },
   "REACT-016": {
     confidence: "HIGH",
     requirements: ["AST"],
     frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
-    documentationUrl: "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
+    documentationUrl:
+      "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
   },
   "REACT-017": {
     confidence: "HIGH",
     requirements: ["AST"],
     frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
-    documentationUrl: "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
+    documentationUrl:
+      "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
   },
   "REACT-018": {
     confidence: "HIGH",
     requirements: ["AST"],
     frameworks: ["REACT", "WEB"],
-    documentationUrl: "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
+    documentationUrl:
+      "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
   },
   "REACT-019": {
     confidence: "HIGH",
     requirements: ["AST"],
     frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
-    documentationUrl: "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
+    documentationUrl:
+      "https://react.dev/blog/2024/04/25/react-19-upgrade-guide",
   },
   "REACT-020": {
     confidence: "HIGH",
@@ -697,7 +731,8 @@ const METADATA: Record<string, MetadataFields> = {
     confidence: "MEDIUM",
     requirements: ["AST"],
     frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
-    documentationUrl: "https://react.dev/reference/react/useEffect#fetching-data-with-effects",
+    documentationUrl:
+      "https://react.dev/reference/react/useEffect#fetching-data-with-effects",
   },
   "REACT-023": {
     confidence: "HIGH",
@@ -709,7 +744,8 @@ const METADATA: Record<string, MetadataFields> = {
     confidence: "HIGH",
     requirements: ["AST"],
     frameworks: ["REACT", "REACT_NATIVE", "EXPO"],
-    documentationUrl: "https://react.dev/reference/react/useState#updating-state-based-on-the-previous-state",
+    documentationUrl:
+      "https://react.dev/reference/react/useState#updating-state-based-on-the-previous-state",
   },
 };
 

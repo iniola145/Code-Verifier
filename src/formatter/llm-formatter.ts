@@ -1,11 +1,11 @@
-import { VerificationResult, Diagnostic } from '../types/verifier';
+import { VerificationResult, Diagnostic } from "../types/verifier";
 
 export class LLMFormatter {
   /**
    * Formats the verification result as concise, high-signal Markdown tailored for LLMs.
    */
   static formatForLLMPrompt(result: VerificationResult): string {
-    if (result.status === 'PASSED') {
+    if (result.status === "PASSED") {
       return `### ✅ Code Verification: PASSED
 - File: \`${result.filePath}\`
 - Lines Analyzed: ${result.stats.totalLines}
@@ -13,15 +13,20 @@ export class LLMFormatter {
 - Status: No security flaws, React hook violations, or abstract interpretation failures detected.`;
     }
 
-    if (result.status === 'INCOMPLETE') {
-      const incomplete = result.checks.filter((check) => check.status === 'INCOMPLETE' || check.status === 'SKIPPED');
+    if (result.status === "INCOMPLETE") {
+      const incomplete = result.checks.filter(
+        (check) => check.status === "INCOMPLETE" || check.status === "SKIPPED",
+      );
       return [
         `### Code Verification: INCOMPLETE`,
         `- File: \`${result.filePath}\``,
         `- Analysis cannot establish that this file passed.`,
-        ...incomplete.map((check) => `- ${check.name}: ${check.status}${check.message ? ` (${check.message})` : ''}`),
+        ...incomplete.map(
+          (check) =>
+            `- ${check.name}: ${check.status}${check.message ? ` (${check.message})` : ""}`,
+        ),
         `- Diagnostics produced before interruption: ${result.diagnostics.length}`,
-      ].join('\n');
+      ].join("\n");
     }
 
     const sections: string[] = [
@@ -36,38 +41,47 @@ export class LLMFormatter {
     });
 
     sections.push(`\n#### Recommended Next Step:`);
-    sections.push(`Please review each issue above, verify the root cause, and apply the recommended fix without introducing regressions.`);
+    sections.push(
+      `Please review each issue above, verify the root cause, and apply the recommended fix without introducing regressions.`,
+    );
 
-    return sections.join('\n');
+    return sections.join("\n");
   }
 
   private static formatDiagnostic(diag: Diagnostic, num: number): string {
     const lines: string[] = [
-      `\n**Issue #${num}: [${diag.severity}] ${diag.ruleId}${diag.cweId ? ` (${diag.cweId})` : ''} - ${diag.message}**`,
+      `\n**Issue #${num}: [${diag.severity}] ${diag.ruleId}${diag.cweId ? ` (${diag.cweId})` : ""} - ${diag.message}**`,
       `- **Location**: Line ${diag.loc.start.line}, Col ${diag.loc.start.column}`,
       `- **Category**: ${diag.category}`,
-      `- **Confidence**: ${diag.confidence ?? 'UNSPECIFIED'}`,
+      `- **Confidence**: ${diag.confidence ?? "UNSPECIFIED"}`,
       `- **Explanation**: ${diag.explanation}`,
     ];
 
-    if (diag.abstractInvariants && Object.keys(diag.abstractInvariants).length > 0) {
+    if (
+      diag.abstractInvariants &&
+      Object.keys(diag.abstractInvariants).length > 0
+    ) {
       const invariants = Object.entries(diag.abstractInvariants)
         .map(([k, v]) => `\`${k}\`: ${v}`)
-        .join(', ');
+        .join(", ");
       lines.push(`- **Abstract Invariants**: ${invariants}`);
     }
 
     lines.push(`- **Offending Code**:`);
-    lines.push('```tsx');
+    lines.push("```tsx");
     lines.push(diag.codeSnippet);
-    lines.push('```');
+    lines.push("```");
 
-    lines.push(`- **LLM Remediation Action**: ${diag.remediation.llmPromptHint}`);
+    lines.push(
+      `- **LLM Remediation Action**: ${diag.remediation.llmPromptHint}`,
+    );
     if (diag.remediation.suggestedFix) {
-      lines.push(`- **Suggested Fix Pattern**: \`${diag.remediation.suggestedFix}\``);
+      lines.push(
+        `- **Suggested Fix Pattern**: \`${diag.remediation.suggestedFix}\``,
+      );
     }
 
-    return lines.join('\n');
+    return lines.join("\n");
   }
 
   /**
