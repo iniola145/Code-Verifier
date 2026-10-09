@@ -132,8 +132,9 @@ export function parseJunitOutput(xmlOutput: string): TraceEvent[] {
   const now = Date.now();
 
   // Parse <testcase ...> ... <failure ...>...</failure> </testcase>
+  // Handles attributes with single or double quotes, self-closing tags, and nested elements
   const testcaseRegex =
-    /<testcase\s+([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/gi;
+    /<testcase\s+([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/gis;
   let tcMatch: RegExpExecArray | null;
 
   while ((tcMatch = testcaseRegex.exec(xmlOutput)) !== null) {

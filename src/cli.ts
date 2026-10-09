@@ -29,7 +29,7 @@ import {
 import { RULE_REGISTRY } from "./rules/registry";
 import { generateTests } from "./test-gen/generator";
 import { OutputMode, TestFramework } from "./test-gen/types";
-import { parseTraceFile, parseJestOutput } from "./runtime/trace-parser";
+import { parseTraceFile, parseJestOutput, parseJunitOutput } from "./runtime/trace-parser";
 import { analyzeRuntimeTraces } from "./runtime/runtime-engine";
 import { TraceEvent, UnifiedAnalysisReport } from "./runtime/types";
 
@@ -404,10 +404,10 @@ Examples:
             "adapters/jest-reporter.js",
           );
           const configArg = jestConfig ? `--config "${jestConfig}"` : "";
-          cmd = `npx jest ${configArg} --reporters=default --reporters="${reporterPath}"`;
+          cmd = `npx jest ${configArg} --json --outputFile="${tmpTraceFile}.json" --reporters=default --reporters="${reporterPath}"`;
         } else if (withVitest) {
           const configArg = vitestConfig ? `--config "${vitestConfig}"` : "";
-          cmd = `npx vitest run ${configArg}`;
+          cmd = `npx vitest run ${configArg} --reporter=junit --outputFile="${tmpTraceFile}.xml"`;
         } else {
           cmd = "npm test";
         }
@@ -423,6 +423,10 @@ Examples:
       } catch (execErr: any) {
         if (fs.existsSync(tmpTraceFile)) {
           traceEvents = parseTraceFile(tmpTraceFile);
+        } else if (fs.existsSync(`${tmpTraceFile}.json`)) {
+          traceEvents = parseJestOutput(fs.readFileSync(`${tmpTraceFile}.json`, "utf-8"));
+        } else if (fs.existsSync(`${tmpTraceFile}.xml`)) {
+          traceEvents = parseJunitOutput(fs.readFileSync(`${tmpTraceFile}.xml`, "utf-8"));
         } else {
           const stdout = execErr.stdout ? String(execErr.stdout) : "";
           traceEvents = parseJestOutput(stdout);
@@ -432,9 +436,12 @@ Examples:
       if (traceEvents.length === 0 && fs.existsSync(tmpTraceFile)) {
         traceEvents = parseTraceFile(tmpTraceFile);
       }
-      try {
-        if (fs.existsSync(tmpTraceFile)) fs.unlinkSync(tmpTraceFile);
-      } catch {}
+      // Cleanup temp files
+      for (const f of [tmpTraceFile, `${tmpTraceFile}.json`, `${tmpTraceFile}.xml`]) {
+        try {
+          if (fs.existsSync(f)) fs.unlinkSync(f);
+        } catch {}
+      }
     }
 
     // Run static analysis on targets

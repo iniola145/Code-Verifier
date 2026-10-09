@@ -57,6 +57,20 @@ export default function codeVerifierPlugin(options?: VitestPluginOptions): any {
       return code;
     },
 
+    onTestFinished(test: any) {
+      if (test.result?.state === "failed") {
+        const failures = test.result?.errors || [];
+        traceEvents.push({
+          type: "assertion_failed",
+          testName: test.name || "Unknown Test",
+          failureMessages: failures.map((e: any) => e.message || String(e)),
+          message: failures[0]?.message || "Test failed",
+          filePath: test.file?.name || "unknown",
+          ts: Date.now(),
+        });
+      }
+    },
+
     buildEnd() {
       writeTraceFile();
     },
