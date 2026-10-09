@@ -44,6 +44,19 @@ import {
   parseJunitOutput,
   analyzeRuntimeTraces,
   formatRuntimeFindings,
+  formatTDRSession,
+  formatFixVerification,
+  createSession,
+  loadSession,
+  saveSession,
+  listSessions,
+  updateSession,
+  deleteSession,
+  setSessionDir,
+  pruneSessions,
+  cleanAllSessions,
+  findExistingTestFile,
+  verifyFix,
   Diagnostic,
 } from "../src";
 import CodeVerifierReporter from "../src/adapters/jest-reporter";
@@ -4175,6 +4188,225 @@ async function runTests() {
         pkg.exports["./jest-setup"],
       "package.json defines exports subpaths for all adapters",
     );
+
+    // =========================================================================
+    // Phase 2C: MCP Test-and-Fix Loop (TDR)
+    // =========================================================================
+    console.log("— Phase 2C: MCP Test-and-Fix Loop (TDR)");
+
+    // 1. Session creation and persistence
+    const testSessionDir = path.join(os.tmpdir(), `tdr-test-${Date.now()}`);
+    setSessionDir(testSessionDir);
+
+    const dummyFinding: Diagnostic = {
+      id: "diag-tdr-1",
+      ruleId: "AI-NULL-001",
+      message: "Possible null dereference on user.name",
+      severity: "HIGH",
+      category: "CORRECTNESS",
+      confidence: "HIGH",
+      loc: { start: { line: 10, column: 5 }, end: { line: 10, column: 20 } },
+      filePath: "/app/src/UserProfile.tsx",
+      explanation: "Null dereference",
+      codeSnippet: "user.name",
+      remediation: { summary: "Add optional chaining", llmPromptHint: "Use user?.name" },
+    };
+
+    const dummyGeneratedTest = {
+      filePath: "/app/src/__tests__/UserProfile.test.tsx",
+      content: "test('handles null', () => {});",
+      testCases: [],
+      sourceFile: "/app/src/UserProfile.tsx",
+      framework: "jest" as const,
+    };
+
+    const session = createSession(
+      "/app/src/UserProfile.tsx",
+      [dummyFinding],
+      [dummyGeneratedTest],
+    );
+    assert(
+      session.id.startsWith("tdr-") &&
+        session.status === "tests_generated" &&
+        session.originalFindings.length === 1 &&
+        session.generatedTests.length === 1,
+      "createSession creates session with unique ID, findings, and generated tests",
+    );
+
+    // 2. Load session from disk
+    const loaded = loadSession(session.id);
+    assert(
+      loaded !== null &&
+        loaded.id === session.id &&
+        loaded.sourceFile === session.sourceFile &&
+        loaded.originalFindings[0].ruleId === "AI-NULL-001",
+      "loadSession retrieves persisted TDR session from disk",
+    );
+
+    // 3. Update session status and data
+    const updated = updateSession(session.id, {
+      status: "verified",
+      fixCommit: "a1b2c3d",
+    });
+    assert(
+      updated !== null &&
+        updated.status === "verified" &&
+        updated.fixCommit === "a1b2c3d",
+      "updateSession modifies session and persists changes to disk",
+    );
+
+    // 4. List sessions
+    const sessionList = listSessions();
+    assert(
+      sessionList.length >= 1 && sessionList.some((s) => s.id === session.id),
+      "listSessions returns all sessions including the updated session",
+    );
+
+    // 5. verifyFix: detects successful static fix
+    const vulnerableSample = `
+      import React from 'react';
+      export function Profile() {
+        const user: any = null;
+        return <div>{user.name}</div>;
+      }
+    `;
+    const verifierInst = new CodeVerifier();
+    const staticCheck = await verifierInst.verifyCode(vulnerableSample, "Profile.tsx");
+    assert(
+      staticCheck.diagnostics.some((d) => d.ruleId === "AI-NULL-001"),
+      "verifier detects AI-NULL-001 in vulnerable sample code",
+    );
+
+    const fixedSample = `
+      import React from 'react';
+      export function Profile() {
+        const user: any = null;
+        return <div>{user?.name}</div>;
+      }
+    `;
+    const fixResult = await verifyFix("Profile.tsx", staticCheck.diagnostics, {
+      codeOverride: fixedSample,
+      runTests: false,
+    });
+    assert(
+      fixResult.fixed === true &&
+        fixResult.remainingFindings.length === 0 &&
+        fixResult.resolvedFindings.length >= 1,
+      "verifyFix reports fixed: true and moves finding to resolvedFindings",
+    );
+
+    // 6. verifyFix: detects incomplete fix
+    const unfixedSample = `
+      import React from 'react';
+      export function Profile() {
+        const user: any = null;
+        return <span>{user.name}</span>;
+      }
+    `;
+    const unfixedResult = await verifyFix("Profile.tsx", staticCheck.diagnostics, {
+      codeOverride: unfixedSample,
+      runTests: false,
+    });
+    assert(
+      unfixedResult.fixed === false &&
+        unfixedResult.remainingFindings.length >= 1 &&
+        unfixedResult.resolvedFindings.length === 0,
+      "verifyFix reports fixed: false when finding is still present in modified code",
+    );
+
+    // 7. verifyFix: handles test command execution (passing)
+    const testPassingResult = await verifyFix("Profile.tsx", staticCheck.diagnostics, {
+      codeOverride: fixedSample,
+      runTests: true,
+      testCommand: "node -e 'process.exit(0)'",
+    });
+    assert(
+      testPassingResult.fixed === true &&
+        testPassingResult.testResult?.passed === true,
+      "verifyFix verifies fix when testCommand succeeds",
+    );
+
+    // 8. verifyFix: handles test command execution (failing)
+    const testFailingResult = await verifyFix("Profile.tsx", staticCheck.diagnostics, {
+      codeOverride: fixedSample,
+      runTests: true,
+      testCommand: "node -e 'process.exit(1)'",
+    });
+    assert(
+      testFailingResult.fixed === false &&
+        testFailingResult.testResult?.passed === false,
+      "verifyFix reports fixed: false when testCommand fails",
+    );
+
+    // 9. LLM Formatter: formatTDRSession and formatFixVerification
+    const formattedSession = formatTDRSession(session);
+    assert(
+      formattedSession.includes("TDR Session:") &&
+        formattedSession.includes("Source:") &&
+        formattedSession.includes("Status:"),
+      "formatTDRSession renders markdown summary of session metadata",
+    );
+
+    const formattedFix = formatFixVerification(fixResult);
+    assert(
+      formattedFix.includes("Fix Verification Result:") &&
+        formattedFix.includes("Resolved Findings:"),
+      "formatFixVerification renders markdown summary of fix results",
+    );
+
+    // 10. Existing test detection
+    const tempSource = path.join(testSessionDir, "Widget.tsx");
+    const tempTest = path.join(testSessionDir, "Widget.test.tsx");
+    fs.writeFileSync(tempSource, "export function Widget() { return null; }", "utf-8");
+    fs.writeFileSync(tempTest, "test('renders', () => {});", "utf-8");
+
+    const foundTest = findExistingTestFile(tempSource);
+    assert(
+      foundTest === tempTest,
+      "findExistingTestFile detects co-located unit test file",
+    );
+
+    const sessionWithExisting = createSession(
+      tempSource,
+      [],
+      [dummyGeneratedTest],
+    );
+    assert(
+      sessionWithExisting.existingTestFound === tempTest,
+      "createSession records existingTestFound in session metadata",
+    );
+
+    // 11. verifyFix with projectRoot and configured verifier
+    const projectVerifier = new CodeVerifier({ projectRoot: testSessionDir });
+    const contextualFix = await verifyFix(tempSource, [], {
+      codeOverride: "export function Widget() { return <div />; }",
+      verifier: projectVerifier,
+      projectRoot: testSessionDir,
+      runTests: false,
+    });
+    assert(
+      contextualFix.fixed === true,
+      "verifyFix operates seamlessly with configured CodeVerifier instance and projectRoot",
+    );
+
+    // 12. Pruning and cleaning sessions
+    const prunedCount = pruneSessions({ maxAgeDays: 0, maxSessions: 1 });
+    assert(
+      typeof prunedCount === "number",
+      "pruneSessions successfully bounds session storage",
+    );
+
+    const cleanedAll = cleanAllSessions();
+    assert(
+      cleanedAll >= 0 && listSessions().length === 0,
+      "cleanAllSessions wipes all sessions from disk",
+    );
+
+    // Reset session directory
+    setSessionDir(null);
+    try {
+      fs.rmSync(testSessionDir, { recursive: true, force: true });
+    } catch {}
   }
 
   console.log(`\n========================================`);

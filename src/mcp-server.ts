@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import * as path from "path";
 import * as readline from "readline";
 import { CodeVerifier } from "./engine";
 import { LLMFormatter } from "./formatter/llm-formatter";
@@ -6,6 +7,8 @@ import { analyzeRuntimeTraces } from "./runtime/runtime-engine";
 import { parseTraceFile } from "./runtime/trace-parser";
 import { generateTestsForFile } from "./test-gen/generator";
 import { TestFramework } from "./test-gen/types";
+import { createSession, loadSession, updateSession } from "./tdr/session-manager";
+import { verifyFix } from "./tdr/fix-verifier";
 
 /**
  * Lightweight JSON-RPC Model Context Protocol (MCP) Server
@@ -130,6 +133,68 @@ class MCPServer {
               required: ["traceFile"],
             },
           },
+          {
+            name: "start_tdr_session",
+            description:
+              "Start a TDR session. Returns session ID, static findings, and generated tests.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                sourceFile: {
+                  type: "string",
+                  description: "Source file to analyze",
+                },
+                framework: {
+                  type: "string",
+                  enum: ["jest", "vitest", "detox"],
+                  description: "Test framework (auto-detected if not specified)",
+                },
+              },
+              required: ["sourceFile"],
+            },
+          },
+          {
+            name: "verify_fix",
+            description:
+              "Verify that a fix resolves a finding. Returns verification result.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                sessionId: {
+                  type: "string",
+                  description: "TDR session ID",
+                },
+                sourceFile: {
+                  type: "string",
+                  description: "Source file that was fixed",
+                },
+                runTests: {
+                  type: "boolean",
+                  description: "Whether to run tests to verify the fix",
+                  default: true,
+                },
+                testCommand: {
+                  type: "string",
+                  description: "Custom test command to execute",
+                },
+              },
+              required: ["sessionId", "sourceFile"],
+            },
+          },
+          {
+            name: "get_tdr_status",
+            description: "Get the status of a TDR session.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                sessionId: {
+                  type: "string",
+                  description: "TDR session ID",
+                },
+              },
+              required: ["sessionId"],
+            },
+          },
         ],
       });
       return;
@@ -243,6 +308,185 @@ class MCPServer {
               {
                 type: "text",
                 text: `Runtime analysis error: ${err.message}`,
+              },
+            ],
+            isError: true,
+          });
+        }
+        return;
+      }
+
+      if (toolName === "start_tdr_session") {
+        const sourceFile = args.sourceFile;
+        const framework = args.framework;
+
+        try {
+          if (!sourceFile) {
+            throw new Error("sourceFile is required");
+          }
+          const resolvedPath = path.resolve(sourceFile);
+          if (!fs.existsSync(resolvedPath)) {
+            throw new Error(`File not found: ${sourceFile}`);
+          }
+          const code = fs.readFileSync(resolvedPath, "utf-8");
+          const result = await this.verifier.verifyCode(code, resolvedPath);
+          const tests = await generateTestsForFile(resolvedPath, {
+            framework: framework as TestFramework | undefined,
+            mode: "directory",
+          });
+          const session = createSession(resolvedPath, result.diagnostics, [tests]);
+
+          this.sendResponse(id, {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    sessionId: session.id,
+                    status: session.status,
+                    sourceFile: session.sourceFile,
+                    findings: session.originalFindings,
+                    generatedTests: tests.content,
+                    existingTestFound: session.existingTestFound,
+                  },
+                  null,
+                  2,
+                ),
+              },
+            ],
+            isError: false,
+          });
+        } catch (err: any) {
+          this.sendResponse(id, {
+            content: [
+              {
+                type: "text",
+                text: `Error starting TDR session: ${err.message}`,
+              },
+            ],
+            isError: true,
+          });
+        }
+        return;
+      }
+
+      if (toolName === "verify_fix") {
+        const sessionId = args.sessionId;
+        const sourceFile = args.sourceFile;
+        const runTests = args.runTests;
+        const testCommand = args.testCommand;
+
+        try {
+          if (!sessionId) {
+            throw new Error("sessionId is required");
+          }
+          const session = loadSession(sessionId);
+          if (!session) {
+            this.sendResponse(id, {
+              content: [
+                {
+                  type: "text",
+                  text: `Session not found: ${sessionId}`,
+                },
+              ],
+              isError: true,
+            });
+            return;
+          }
+
+          const resolvedFile = sourceFile
+            ? path.resolve(sourceFile)
+            : session.sourceFile;
+
+          const result = await verifyFix(
+            resolvedFile,
+            session.originalFindings,
+            {
+              runTests: runTests !== false,
+              testCommand,
+              testFile: session.generatedTests[0]?.filePath,
+              verifier: this.verifier,
+            },
+          );
+
+          const nextStatus = result.fixed
+            ? "verified"
+            : result.testResult && !result.testResult.passed
+              ? "tests_failing"
+              : "fixed";
+
+          updateSession(sessionId, {
+            status: nextStatus,
+            verificationResult: result,
+          });
+
+          this.sendResponse(id, {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    sessionId,
+                    status: nextStatus,
+                    ...result,
+                  },
+                  null,
+                  2,
+                ),
+              },
+            ],
+            isError: !result.fixed,
+          });
+        } catch (err: any) {
+          this.sendResponse(id, {
+            content: [
+              {
+                type: "text",
+                text: `Error verifying fix: ${err.message}`,
+              },
+            ],
+            isError: true,
+          });
+        }
+        return;
+      }
+
+      if (toolName === "get_tdr_status") {
+        const sessionId = args.sessionId;
+
+        try {
+          if (!sessionId) {
+            throw new Error("sessionId is required");
+          }
+          const session = loadSession(sessionId);
+          if (!session) {
+            this.sendResponse(id, {
+              content: [
+                {
+                  type: "text",
+                  text: `Session not found: ${sessionId}`,
+                },
+              ],
+              isError: true,
+            });
+            return;
+          }
+
+          this.sendResponse(id, {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(session, null, 2),
+              },
+            ],
+            isError: false,
+          });
+        } catch (err: any) {
+          this.sendResponse(id, {
+            content: [
+              {
+                type: "text",
+                text: `Error getting TDR status: ${err.message}`,
               },
             ],
             isError: true,

@@ -1,5 +1,7 @@
 import { VerificationResult, Diagnostic } from "../types/verifier";
 import { RuntimeFinding } from "../runtime/types";
+import { TDRSession } from "../tdr/session-manager";
+import { FixVerificationResult } from "../tdr/fix-verifier";
 
 export class LLMFormatter {
   /**
@@ -135,6 +137,14 @@ export class LLMFormatter {
 
     return sections.join("\n");
   }
+
+  static formatTDRSession(session: TDRSession): string {
+    return formatTDRSession(session);
+  }
+
+  static formatFixVerification(result: FixVerificationResult): string {
+    return formatFixVerification(result);
+  }
 }
 
 /**
@@ -162,4 +172,66 @@ ${traceLines}`;
     })
     .join("\n\n");
 }
+
+/**
+ * Formats a TDR session into Markdown.
+ */
+export function formatTDRSession(session: TDRSession): string {
+  const sections = [
+    `## TDR Session: ${session.id}`,
+    `- Source: ${session.sourceFile}`,
+    `- Status: ${session.status}`,
+    `- Created: ${session.createdAt}`,
+    `- Findings: ${session.originalFindings.length}`,
+    `- Generated Tests: ${session.generatedTests.length}`,
+  ];
+
+  if (session.verificationResult) {
+    const vr = session.verificationResult;
+    sections.push(`- Fixed: ${vr.fixed}`);
+    sections.push(`- Resolved: ${vr.resolvedFindings.length}`);
+    sections.push(`- Remaining: ${vr.remainingFindings.length}`);
+    sections.push(`- New: ${vr.newFindings.length}`);
+    if (vr.testResult) {
+      sections.push(`- Tests: ${vr.testResult.passed ? "PASSED" : "FAILED"}`);
+    }
+  }
+
+  return sections.join("\n");
+}
+
+/**
+ * Formats fix verification results into Markdown.
+ */
+export function formatFixVerification(result: FixVerificationResult): string {
+  const sections = [
+    `## Fix Verification Result: ${result.fixed ? "✅ FIXED" : "❌ UNRESOLVED"}`,
+    `- Resolved Findings: ${result.resolvedFindings.length}`,
+    `- Remaining Findings: ${result.remainingFindings.length}`,
+    `- New Findings: ${result.newFindings.length}`,
+  ];
+
+  if (result.testResult) {
+    sections.push(
+      `- Test Execution: ${result.testResult.passed ? "PASSED" : "FAILED"}`,
+    );
+  }
+
+  if (result.remainingFindings.length > 0) {
+    sections.push(`\n### ⚠️ Remaining Findings:`);
+    for (const f of result.remainingFindings) {
+      sections.push(`- [${f.severity}] ${f.ruleId} (line ${f.loc.start.line}): ${f.message}`);
+    }
+  }
+
+  if (result.newFindings.length > 0) {
+    sections.push(`\n### ⚠️ Newly Introduced Findings:`);
+    for (const f of result.newFindings) {
+      sections.push(`- [${f.severity}] ${f.ruleId} (line ${f.loc.start.line}): ${f.message}`);
+    }
+  }
+
+  return sections.join("\n");
+}
+
 

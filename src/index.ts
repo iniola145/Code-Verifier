@@ -42,3 +42,5 @@ export * from "./test-gen/mock-synthesizer";
 export * from "./runtime/types";
 export * from "./runtime/trace-parser";
 export * from "./runtime/runtime-engine";
+export * from "./tdr/session-manager";
+export * from "./tdr/fix-verifier";

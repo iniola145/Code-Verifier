@@ -27,11 +27,20 @@ import {
   ScanCache,
 } from "./scan-cache";
 import { RULE_REGISTRY } from "./rules/registry";
-import { generateTests } from "./test-gen/generator";
+import { generateTests, generateTestsForFile } from "./test-gen/generator";
 import { OutputMode, TestFramework } from "./test-gen/types";
 import { parseTraceFile, parseJestOutput, parseJunitOutput } from "./runtime/trace-parser";
 import { analyzeRuntimeTraces } from "./runtime/runtime-engine";
 import { TraceEvent, UnifiedAnalysisReport } from "./runtime/types";
+import {
+  createSession,
+  loadSession,
+  listSessions,
+  updateSession,
+  pruneSessions,
+  cleanAllSessions,
+} from "./tdr/session-manager";
+import { verifyFix } from "./tdr/fix-verifier";
 
 const SOURCE_EXTENSIONS = new Set([
   ".ts",
@@ -155,6 +164,12 @@ Options:
   --test-command=CMD         Custom command to execute tests
   --test-format=FORMAT       Format of test output: json | junit | verbose
   --no-correlate             Disable static-to-runtime correlation
+  --start-tdr[=FILE]         Start a TDR session: verify, generate tests, and save session
+  --verify-fix               Verify a bug fix against an existing TDR session
+  --session-id=ID            Specify TDR session ID for --verify-fix
+  --tdr-status=ID            Inspect state of an existing TDR session
+  --list-tdr                 List all saved TDR sessions
+  --clean-tdr[=all]          Clean/prune stored TDR sessions (--clean-tdr=all for full cleanup)
   --list-rules       Print the complete rule catalog (add --json for metadata)
   --help, -h         Show this help message
 
@@ -232,6 +247,9 @@ Examples:
       "--vitest-config",
       "--runtime-traces",
       "--test-command",
+      "--test-format",
+      "--session-id",
+      "--tdr-status",
     ]);
 
     const posTargets: string[] = [];
@@ -360,6 +378,149 @@ Examples:
 
     console.log(`Generated ${results.length} test file(s)`);
     process.exit(0);
+  }
+
+  // =========================================================================
+  // Phase 2C: TDR (Test-Driven Remediation) Loop
+  // =========================================================================
+  const startTDR =
+    args.includes("--start-tdr") ||
+    args.some((a) => a.startsWith("--start-tdr="));
+  const verifyFixFlag = args.includes("--verify-fix");
+  const tdrStatus = getFlag(args, "--tdr-status");
+  const listTDR = args.includes("--list-tdr") || args.includes("--tdr-sessions");
+  const cleanTDR =
+    args.includes("--clean-tdr") ||
+    args.some((a) => a.startsWith("--clean-tdr="));
+
+  if (cleanTDR) {
+    const cleanMode = getFlag(args, "--clean-tdr");
+    const count =
+      cleanMode === "all"
+        ? cleanAllSessions()
+        : pruneSessions({ maxAgeDays: 7, maxSessions: 50 });
+    console.log(`Cleaned ${count} TDR session(s).`);
+    process.exit(0);
+  }
+
+  if (listTDR) {
+    const sessions = listSessions();
+    console.log(JSON.stringify(sessions, null, 2));
+    process.exit(0);
+  }
+
+  if (tdrStatus) {
+    const session = loadSession(tdrStatus);
+    if (!session) {
+      console.error(`Error: Session not found: ${tdrStatus}`);
+      process.exit(1);
+    }
+    console.log(JSON.stringify(session, null, 2));
+    process.exit(0);
+  }
+
+  if (startTDR) {
+    const targetFlag = getFlag(args, "--start-tdr");
+    const target =
+      targetFlag && targetFlag !== "" ? targetFlag : targets[0];
+    if (!target) {
+      console.error("Error: No target file specified for --start-tdr.");
+      process.exit(1);
+    }
+
+    const resolvedTarget = path.resolve(target);
+    if (!fs.existsSync(resolvedTarget)) {
+      console.error(`Error: Target file not found: ${target}`);
+      process.exit(1);
+    }
+
+    const code = fs.readFileSync(resolvedTarget, "utf-8");
+    const tdrVerifier = new CodeVerifier({
+      enableAbstractInterpretation: !disableAI,
+      disabledRules: [...config.disable, ...cliDisable],
+      severityOverrides: config.severities,
+      baselineFingerprints,
+      failOn,
+      projectRoot,
+    });
+    const result = await tdrVerifier.verifyCode(code, resolvedTarget);
+    const framework = getFlag(args, "--framework") as
+      | TestFramework
+      | undefined;
+    const tests = await generateTestsForFile(resolvedTarget, {
+      framework,
+      mode: "directory",
+    });
+    const session = createSession(resolvedTarget, result.diagnostics, [tests]);
+
+    console.log(`TDR Session: ${session.id}`);
+    console.log(`Status: ${session.status}`);
+    console.log(`Findings: ${session.originalFindings.length}`);
+    if (session.existingTestFound) {
+      console.log(
+        `Existing Test: ${session.existingTestFound} (preserved without modifying)`,
+      );
+    }
+    console.log(`Tests: ${tests.content}`);
+    process.exit(0);
+  }
+
+  if (verifyFixFlag) {
+    const sessionId = getFlag(args, "--session-id");
+    if (!sessionId) {
+      console.error("Error: --session-id is required for --verify-fix.");
+      process.exit(1);
+    }
+
+    const session = loadSession(sessionId);
+    if (!session) {
+      console.error(`Error: Session not found: ${sessionId}`);
+      process.exit(1);
+    }
+
+    const target =
+      targets.length > 0 && fs.existsSync(path.resolve(targets[0]))
+        ? path.resolve(targets[0])
+        : session.sourceFile;
+    const runTestsVal = !args.includes("--no-run-tests");
+    const customTestCmd = getFlag(args, "--test-command");
+
+    const tdrVerifier = new CodeVerifier({
+      enableAbstractInterpretation: !disableAI,
+      disabledRules: [...config.disable, ...cliDisable],
+      severityOverrides: config.severities,
+      baselineFingerprints,
+      failOn,
+      projectRoot,
+    });
+
+    const result = await verifyFix(target, session.originalFindings, {
+      runTests: runTestsVal,
+      testCommand: customTestCmd,
+      testFile: session.generatedTests[0]?.filePath,
+      verifier: tdrVerifier,
+      projectRoot,
+    });
+
+    const nextStatus = result.fixed
+      ? "verified"
+      : result.testResult && !result.testResult.passed
+        ? "tests_failing"
+        : "fixed";
+
+    updateSession(sessionId, {
+      status: nextStatus,
+      verificationResult: result,
+    });
+
+    console.log(`Fixed: ${result.fixed}`);
+    console.log(`Resolved: ${result.resolvedFindings.length}`);
+    console.log(`Remaining: ${result.remainingFindings.length}`);
+    console.log(`New: ${result.newFindings.length}`);
+    if (result.testResult) {
+      console.log(`Tests: ${result.testResult.passed ? "PASSED" : "FAILED"}`);
+    }
+    process.exit(result.fixed ? 0 : 1);
   }
 
   // =========================================================================
