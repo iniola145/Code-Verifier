@@ -1,6 +1,9 @@
+import * as fs from "fs";
 import * as readline from "readline";
 import { CodeVerifier } from "./engine";
 import { LLMFormatter } from "./formatter/llm-formatter";
+import { analyzeRuntimeTraces } from "./runtime/runtime-engine";
+import { parseTraceFile } from "./runtime/trace-parser";
 import { generateTestsForFile } from "./test-gen/generator";
 import { TestFramework } from "./test-gen/types";
 
@@ -107,6 +110,26 @@ class MCPServer {
               required: ["filePath"],
             },
           },
+          {
+            name: "get_runtime_findings",
+            description:
+              "Get runtime findings from a trace file. Returns confirmed bugs with evidence.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                traceFile: {
+                  type: "string",
+                  description: "Path to JSONL trace file",
+                },
+                staticResultsFile: {
+                  type: "string",
+                  description:
+                    "Optional path to static analysis results JSON",
+                },
+              },
+              required: ["traceFile"],
+            },
+          },
         ],
       });
       return;
@@ -184,6 +207,42 @@ class MCPServer {
               {
                 type: "text",
                 text: `Error generating tests: ${err.message}`,
+              },
+            ],
+            isError: true,
+          });
+        }
+        return;
+      }
+
+      if (toolName === "get_runtime_findings") {
+        const traceFile = args.traceFile;
+        const staticResultsFile = args.staticResultsFile;
+
+        try {
+          const traces = parseTraceFile(traceFile);
+          const staticFindings =
+            staticResultsFile && fs.existsSync(staticResultsFile)
+              ? JSON.parse(fs.readFileSync(staticResultsFile, "utf-8"))
+              : undefined;
+
+          const findings = analyzeRuntimeTraces(traces, staticFindings);
+
+          this.sendResponse(id, {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(findings, null, 2),
+              },
+            ],
+            isError: false,
+          });
+        } catch (err: any) {
+          this.sendResponse(id, {
+            content: [
+              {
+                type: "text",
+                text: `Runtime analysis error: ${err.message}`,
               },
             ],
             isError: true,

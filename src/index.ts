@@ -39,3 +39,6 @@ export * from "./test-gen/generator";
 export * from "./test-gen/strategies";
 export * from "./test-gen/templates";
 export * from "./test-gen/mock-synthesizer";
+export * from "./runtime/types";
+export * from "./runtime/trace-parser";
+export * from "./runtime/runtime-engine";

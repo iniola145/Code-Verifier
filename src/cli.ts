@@ -18,7 +18,8 @@ import { verifyMobileConfigs } from "./mobile-config";
 import { verifyDeploymentConfigs } from "./deployment-config";
 import { verifyNativeConsistency } from "./native-consistency";
 import { availableParallelism } from "os";
-import { spawnSync } from "child_process";
+import * as os from "os";
+import { execSync, spawnSync } from "child_process";
 import {
   fileCacheKey,
   mapWithConcurrency,
@@ -28,6 +29,9 @@ import {
 import { RULE_REGISTRY } from "./rules/registry";
 import { generateTests } from "./test-gen/generator";
 import { OutputMode, TestFramework } from "./test-gen/types";
+import { parseTraceFile, parseJestOutput } from "./runtime/trace-parser";
+import { analyzeRuntimeTraces } from "./runtime/runtime-engine";
+import { TraceEvent, UnifiedAnalysisReport } from "./runtime/types";
 
 const SOURCE_EXTENSIONS = new Set([
   ".ts",
@@ -143,6 +147,14 @@ Options:
   --framework=NAME           Target test framework: jest | vitest | detox (auto-detected)
   --rule=RULE_ID             Filter generation to a specific rule ID (e.g. AI-NULL-001)
   --in-place                 Write generated test files alongside target files
+  --with-jest                Run Jest and capture runtime traces
+  --with-vitest              Run Vitest and capture runtime traces
+  --jest-config=FILE         Specify custom Jest configuration file
+  --runtime-traces=FILE      Correlate static findings with existing JSONL/JUnit trace file
+  --run-tests                Run tests using detected runner
+  --test-command=CMD         Custom command to execute tests
+  --test-format=FORMAT       Format of test output: json | junit | verbose
+  --no-correlate             Disable static-to-runtime correlation
   --list-rules       Print the complete rule catalog (add --json for metadata)
   --help, -h         Show this help message
 
@@ -216,6 +228,10 @@ Examples:
       "--output",
       "--framework",
       "--rule",
+      "--jest-config",
+      "--vitest-config",
+      "--runtime-traces",
+      "--test-command",
     ]);
 
     const posTargets: string[] = [];
@@ -343,6 +359,145 @@ Examples:
     }
 
     console.log(`Generated ${results.length} test file(s)`);
+    process.exit(0);
+  }
+
+  // =========================================================================
+  // Phase 2B: Test Runner Integration & Runtime Correlation
+  // =========================================================================
+  const withJest =
+    args.includes("--with-jest") ||
+    args.some((a) => a.startsWith("--with-jest"));
+  const withVitest =
+    args.includes("--with-vitest") ||
+    args.some((a) => a.startsWith("--with-vitest"));
+  const runtimeTracesFlag = getFlag(args, "--runtime-traces");
+  const runTests =
+    args.includes("--run-tests") ||
+    args.some((a) => a.startsWith("--run-tests"));
+  const testCommand = getFlag(args, "--test-command");
+  const jestConfig = getFlag(args, "--jest-config");
+  const vitestConfig = getFlag(args, "--vitest-config");
+  const isRuntimeRun =
+    withJest ||
+    withVitest ||
+    Boolean(runtimeTracesFlag) ||
+    runTests ||
+    Boolean(testCommand);
+
+  if (isRuntimeRun) {
+    let traceEvents: TraceEvent[] = [];
+
+    if (runtimeTracesFlag) {
+      traceEvents = parseTraceFile(path.resolve(runtimeTracesFlag));
+    } else {
+      const tmpTraceFile = path.join(
+        os.tmpdir(),
+        `cv-trace-${Date.now()}-${Math.random().toString(36).substring(2)}.jsonl`,
+      );
+
+      let cmd = testCommand;
+      if (!cmd) {
+        if (withJest) {
+          const reporterPath = path.resolve(
+            __dirname,
+            "adapters/jest-reporter.js",
+          );
+          const configArg = jestConfig ? `--config "${jestConfig}"` : "";
+          cmd = `npx jest ${configArg} --reporters=default --reporters="${reporterPath}"`;
+        } else if (withVitest) {
+          const configArg = vitestConfig ? `--config "${vitestConfig}"` : "";
+          cmd = `npx vitest run ${configArg}`;
+        } else {
+          cmd = "npm test";
+        }
+      }
+
+      try {
+        execSync(cmd, {
+          cwd: projectRoot,
+          stdio: "pipe",
+          env: { ...process.env, CODE_VERIFIER_TRACE_FILE: tmpTraceFile },
+          encoding: "utf-8",
+        });
+      } catch (execErr: any) {
+        if (fs.existsSync(tmpTraceFile)) {
+          traceEvents = parseTraceFile(tmpTraceFile);
+        } else {
+          const stdout = execErr.stdout ? String(execErr.stdout) : "";
+          traceEvents = parseJestOutput(stdout);
+        }
+      }
+
+      if (traceEvents.length === 0 && fs.existsSync(tmpTraceFile)) {
+        traceEvents = parseTraceFile(tmpTraceFile);
+      }
+      try {
+        if (fs.existsSync(tmpTraceFile)) fs.unlinkSync(tmpTraceFile);
+      } catch {}
+    }
+
+    // Run static analysis on targets
+    const staticResults: VerificationResult[] = [];
+    const allFiles = isStdin ? [] : expandTargets(targets, config.exclude);
+
+    const sharedUiIndex =
+      allFiles.length > 0 ? ProjectUiIndex.fromFiles(allFiles) : undefined;
+    const sharedSummaryIndex =
+      allFiles.length > 0
+        ? ProjectSummaryIndex.fromFiles(allFiles)
+        : undefined;
+
+    const runtimeVerifier = new CodeVerifier({
+      enableAbstractInterpretation: !disableAI,
+      disabledRules: [...config.disable, ...cliDisable],
+      severityOverrides: config.severities,
+      projectSummaryIndex: sharedSummaryIndex,
+      projectUiIndex: sharedUiIndex,
+      baselineFingerprints,
+      failOn,
+      projectRoot,
+    });
+
+    if (isStdin) {
+      const code = fs.readFileSync(0, "utf-8");
+      staticResults.push(await runtimeVerifier.verifyCode(code, "stdin.tsx"));
+    } else {
+      for (const f of allFiles) {
+        if (!fs.existsSync(f) || !fs.statSync(f).isFile()) continue;
+        const code = fs.readFileSync(f, "utf-8");
+        staticResults.push(await runtimeVerifier.verifyCode(code, f));
+      }
+    }
+
+    const allStaticDiagnostics = staticResults.flatMap((r) => r.diagnostics);
+    const runtimeFindings = analyzeRuntimeTraces(
+      traceEvents,
+      allStaticDiagnostics,
+    );
+
+    if (format === "json") {
+      const report: UnifiedAnalysisReport = {
+        staticFindings: allStaticDiagnostics,
+        runtimeFindings,
+        summary: {
+          totalStatic: allStaticDiagnostics.length,
+          totalRuntime: runtimeFindings.length,
+          confirmedCount: runtimeFindings.filter((f) =>
+            f.ruleId.startsWith("RT-CONFIRM"),
+          ).length,
+          newRuntimeCount: runtimeFindings.filter((f) =>
+            f.ruleId.startsWith("RT-NEW"),
+          ).length,
+        },
+      };
+      console.log(JSON.stringify(report, null, 2));
+    } else {
+      console.log(
+        LLMFormatter.formatUnifiedReport(staticResults, runtimeFindings),
+      );
+    }
+
     process.exit(0);
   }
 

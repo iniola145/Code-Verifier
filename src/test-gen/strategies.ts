@@ -457,7 +457,8 @@ function generateDefaultPropValue(
     lower.includes("active")
   )
     return `true`;
-  if (lower === "user") return `{ id: 'u1', name: 'Test User' }`;
+  if (lower === "user" || lower === "item" || lower === "data")
+    return `{ id: 'test-id', name: 'Test' }`;
   if (lower === "route") return `{ params: {} }`;
   if (lower === "navigation")
     return `{ navigate: ${fnKeyword}, goBack: ${fnKeyword} }`;

@@ -37,6 +37,17 @@ import {
   RaceConditionStrategy,
   synthesizeMocks,
 } from "../src/test-gen";
+import {
+  parseTraceContent,
+  parseTraceFile,
+  parseJestOutput,
+  parseJunitOutput,
+  analyzeRuntimeTraces,
+  formatRuntimeFindings,
+  Diagnostic,
+} from "../src";
+import CodeVerifierReporter from "../src/adapters/jest-reporter";
+import codeVerifierPlugin from "../src/adapters/vitest-plugin";
 import { parseSourceCode } from "../src/parser/ast";
 
 /** Recursively collects source files under dir, skipping node_modules/dist/.git. */
@@ -3899,6 +3910,270 @@ async function runTests() {
         reExportMockCode.includes("Button: jest.fn()") &&
         reExportMockCode.includes("Badge: jest.fn()"),
       "Mock synthesizer captures export ... from re-exports",
+    );
+  }
+
+  // =========================================================================
+  // Phase 2B: Test Runner Integration & Runtime Correlation
+  // =========================================================================
+  console.log("— Phase 2B: Test Runner Integration & Runtime Correlation");
+  {
+    // 1. Trace Parser: JSONL Parsing
+    const sampleJsonl = `
+      {"type":"assertion_failed","testName":"should render safely","filePath":"src/Screen.tsx","ts":1000}
+      {"type":"console_error","message":"Warning: setState on unmounted component","filePath":"src/Screen.tsx","ts":1001}
+    `;
+    const jsonlEvents = parseTraceContent(sampleJsonl);
+    assert(
+      jsonlEvents.length === 2 &&
+        jsonlEvents[0].type === "assertion_failed" &&
+        jsonlEvents[1].type === "console_error",
+      "parseTraceContent parses JSONL trace streams into TraceEvent objects",
+    );
+
+    // 2. Trace Parser: Jest JSON Output Parsing
+    const jestJsonOutput = JSON.stringify({
+      testResults: [
+        {
+          name: "/app/src/LoginScreen.test.tsx",
+          testResults: [
+            {
+              fullName: "LoginScreen should not store token in AsyncStorage",
+              status: "failed",
+              failureMessages: [
+                "Error: expect(AsyncStorage.setItem).not.toHaveBeenCalledWith(...)\n    at Object.<anonymous> (/app/src/LoginScreen.tsx:42:10)",
+              ],
+              duration: 25,
+            },
+          ],
+          console: [
+            {
+              type: "error",
+              message: "Unhandled promise rejection in auth call",
+            },
+          ],
+        },
+      ],
+    });
+    const jestEvents = parseJestOutput(jestJsonOutput);
+    assert(
+      jestEvents.length === 2 &&
+        jestEvents[0].type === "assertion_failed" &&
+        jestEvents[0].line === 42 &&
+        jestEvents[1].type === "console_error",
+      "parseJestOutput extracts failed assertions with stack line numbers and console errors",
+    );
+
+    // 3. Trace Parser: JUnit XML Output Parsing
+    const junitXml = `
+      <?xml version="1.0" encoding="UTF-8"?>
+      <testsuites>
+        <testsuite name="UserScreen Tests">
+          <testcase name="should handle null user safely" file="/app/src/UserScreen.tsx" line="20">
+            <failure message="TypeError: Cannot read property 'name' of null">
+              TypeError: Cannot read property 'name' of null
+                at UserScreen (/app/src/UserScreen.tsx:20:15)
+            </failure>
+          </testcase>
+        </testsuite>
+      </testsuites>
+    `;
+    const junitEvents = parseJunitOutput(junitXml);
+    assert(
+      junitEvents.length === 1 &&
+        junitEvents[0].testName === "should handle null user safely" &&
+        junitEvents[0].line === 20,
+      "parseJunitOutput extracts test failures with file and line metadata",
+    );
+
+    // 4. Runtime Engine: Correlation with Static Finding (RT-CONFIRM-001)
+    const staticFinding1: Diagnostic = {
+      id: "diag-1",
+      ruleId: "RN-SEC-001",
+      message: "Plaintext token stored in AsyncStorage",
+      severity: "CRITICAL",
+      category: "SECURITY",
+      confidence: "HIGH",
+      loc: { start: { line: 42, column: 0 }, end: { line: 42, column: 20 } },
+      filePath: "/app/src/LoginScreen.tsx",
+      explanation: "Security rule violation",
+      codeSnippet: "AsyncStorage.setItem('token', t);",
+      remediation: { summary: "Use SecureStore", llmPromptHint: "Use SecureStore" },
+    };
+
+    const confirmedFindings = analyzeRuntimeTraces(jestEvents, [staticFinding1]);
+    const secConfirm = confirmedFindings.find((f) => f.ruleId === "RT-CONFIRM-001");
+    assert(
+      Boolean(secConfirm) &&
+        secConfirm?.severity === "CRITICAL" &&
+        secConfirm?.confirmedBy.includes("LoginScreen"),
+      "Runtime engine confirms static finding as RT-CONFIRM-001 when test assertion fails",
+    );
+
+    // 5. Runtime Engine: Null Dereference Confirmation (RT-CONFIRM-002)
+    const staticFindingNull: Diagnostic = {
+      id: "diag-2",
+      ruleId: "AI-NULL-001",
+      message: "Definite null dereference on user",
+      severity: "HIGH",
+      category: "CORRECTNESS",
+      confidence: "HIGH",
+      loc: { start: { line: 20, column: 0 }, end: { line: 20, column: 15 } },
+      filePath: "/app/src/UserScreen.tsx",
+      explanation: "Null dereference",
+      codeSnippet: "user.name",
+      remediation: { summary: "Add null check", llmPromptHint: "Add null check" },
+    };
+
+    const nullConfirmed = analyzeRuntimeTraces(junitEvents, [staticFindingNull]);
+    assert(
+      nullConfirmed.length === 1 &&
+        nullConfirmed[0].ruleId === "RT-CONFIRM-002" &&
+        nullConfirmed[0].message.includes("null dereference"),
+      "Runtime engine maps runtime TypeError on null to RT-CONFIRM-002",
+    );
+
+    // 6. Runtime Engine: Unhandled Rejection Confirmation (RT-CONFIRM-003)
+    const rejectionEvent = [
+      {
+        type: "unhandled_rejection",
+        testName: "async flow test",
+        reason: "Network timeout in fetch",
+        filePath: "/app/src/DataScreen.tsx",
+        line: 15,
+        ts: Date.now(),
+      },
+    ];
+    const staticFindingAsync: Diagnostic = {
+      id: "diag-3",
+      ruleId: "ASYNC-001",
+      message: "Unhandled promise rejection in async action",
+      severity: "HIGH",
+      category: "CORRECTNESS",
+      confidence: "HIGH",
+      loc: { start: { line: 15, column: 0 }, end: { line: 15, column: 10 } },
+      filePath: "/app/src/DataScreen.tsx",
+      explanation: "Missing catch handler",
+      codeSnippet: "fetchData()",
+      remediation: { summary: "Add catch", llmPromptHint: "Add catch" },
+    };
+    const asyncConfirmed = analyzeRuntimeTraces(rejectionEvent, [staticFindingAsync]);
+    assert(
+      asyncConfirmed.length === 1 &&
+        asyncConfirmed[0].ruleId === "RT-CONFIRM-003",
+      "Runtime engine maps unhandled rejection event to RT-CONFIRM-003",
+    );
+
+    // 7. Runtime Engine: New Runtime Bug Detection (RT-NEW-001)
+    const unknownEvents = [
+      {
+        type: "assertion_failed",
+        testName: "unrelated test should validate currency format",
+        message: "Expected '$10.00' but got '10.00'",
+        filePath: "/app/src/Format.tsx",
+        ts: Date.now(),
+      },
+    ];
+    const newFindings = analyzeRuntimeTraces(unknownEvents, []);
+    assert(
+      newFindings.length === 1 &&
+        newFindings[0].ruleId === "RT-NEW-001" &&
+        newFindings[0].staticFinding === undefined,
+      "Runtime engine flags runtime failure without static counterpart as RT-NEW-001",
+    );
+
+    // 8. Jest Reporter Adapter
+    const tmpTraceDir = fs.mkdtempSync(path.join(os.tmpdir(), "cv-rep-"));
+    const tmpTracePath = path.join(tmpTraceDir, "trace.jsonl");
+    const reporter = new CodeVerifierReporter({}, { outputFile: tmpTracePath });
+
+    reporter.onTestResult(
+      { path: "/src/HomeScreen.test.tsx" },
+      {
+        numPassingTests: 1,
+        numFailingTests: 1,
+        testResults: [
+          {
+            fullName: "HomeScreen crashes on render",
+            status: "failed",
+            failureMessages: ["ReferenceError: window is not defined"],
+            duration: 10,
+          },
+        ],
+        console: [{ type: "error", message: "Console error in HomeScreen" }],
+      },
+    );
+    reporter.onRunComplete({}, {});
+    assert(
+      reporter.getTraceEvents().length === 2 &&
+        reporter.getResults().has("/src/HomeScreen.test.tsx"),
+      "CodeVerifierReporter captures assertion failures and console errors",
+    );
+    assert(
+      fs.existsSync(tmpTracePath) &&
+        parseTraceFile(tmpTracePath).length === 2,
+      "CodeVerifierReporter persists trace events to JSONL file on run completion",
+    );
+
+    // 9. Vitest Plugin Adapter
+    const vitestPluginInstance = codeVerifierPlugin({ outputFile: tmpTracePath });
+    assert(
+      vitestPluginInstance.name === "code-verifier" &&
+        typeof vitestPluginInstance.transform === "function",
+      "codeVerifierPlugin returns valid Vite/Vitest plugin object",
+    );
+    const transformed = vitestPluginInstance.transform(
+      "describe('test', () => {});",
+      "/src/component.test.tsx",
+    );
+    assert(
+      transformed.includes("unhandledRejection"),
+      "Vitest plugin injects error capture preamble into test source files",
+    );
+
+    // 10. Unified LLM Formatter
+    const formattedRuntime = formatRuntimeFindings(confirmedFindings);
+    assert(
+      formattedRuntime.includes("RT-CONFIRM") &&
+        formattedRuntime.includes("Trace Evidence"),
+      "formatRuntimeFindings renders markdown with severity, confirmedBy, and trace evidence",
+    );
+
+    const unifiedMarkdown = LLMFormatter.formatUnifiedReport(
+      [{
+        filePath: "/app/src/LoginScreen.tsx",
+        status: "FAILED",
+        passed: false,
+        summary: "Verification failed with 1 diagnostic",
+        diagnostics: [staticFinding1],
+        checks: [],
+        stats: {
+          totalLines: 100,
+          blocksAnalyzed: 5,
+          rulesChecked: 10,
+          executionTimeMs: 12,
+          issuesCount: { critical: 1, high: 0, medium: 0, low: 0, info: 0 },
+        },
+      }],
+      confirmedFindings,
+    );
+    assert(
+      unifiedMarkdown.includes("Unified Report") &&
+        unifiedMarkdown.includes("Runtime Verified Findings") &&
+        unifiedMarkdown.includes("Static Analysis Results"),
+      "LLMFormatter.formatUnifiedReport combines static diagnostics with runtime evidence",
+    );
+
+    // 11. Package Exports validation
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(__dirname, "../package.json"), "utf-8"),
+    );
+    assert(
+      pkg.exports &&
+        pkg.exports["./jest-reporter"] &&
+        pkg.exports["./vitest-plugin"] &&
+        pkg.exports["./jest-setup"],
+      "package.json defines exports subpaths for all adapters",
     );
   }
 

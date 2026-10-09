@@ -4,6 +4,12 @@
   "description": "Static Application Security Testing (SAST) and Abstract Interpretation engine for React, React Native, Expo, and TypeScript",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./jest-reporter": "./dist/adapters/jest-reporter.js",
+    "./vitest-plugin": "./dist/adapters/vitest-plugin.js",
+    "./jest-setup": "./dist/adapters/jest-setup.js"
+  },
   "files": [
     "dist",
     "action.yml",

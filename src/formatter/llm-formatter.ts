@@ -1,4 +1,5 @@
 import { VerificationResult, Diagnostic } from "../types/verifier";
+import { RuntimeFinding } from "../runtime/types";
 
 export class LLMFormatter {
   /**
@@ -90,4 +91,75 @@ export class LLMFormatter {
   static formatJSON(result: VerificationResult, pretty = true): string {
     return JSON.stringify(result, null, pretty ? 2 : 0);
   }
+
+  /**
+   * Format runtime findings and unified static+runtime report for LLM / CLI.
+   */
+  static formatRuntimeFindings(findings: RuntimeFinding[]): string {
+    return formatRuntimeFindings(findings);
+  }
+
+  static formatUnifiedReport(
+    staticResults: VerificationResult[],
+    runtimeFindings: RuntimeFinding[],
+  ): string {
+    const totalStatic = staticResults.reduce(
+      (sum, r) => sum + r.diagnostics.length,
+      0,
+    );
+    const confirmedCount = runtimeFindings.filter((f) =>
+      f.ruleId.startsWith("RT-CONFIRM"),
+    ).length;
+    const newCount = runtimeFindings.filter((f) =>
+      f.ruleId.startsWith("RT-NEW"),
+    ).length;
+
+    const sections: string[] = [
+      `## 🔍 Code Verifier Unified Report (Static + Runtime)`,
+      `- Static Diagnostics: ${totalStatic}`,
+      `- Confirmed by Tests: ${confirmedCount}`,
+      `- New Runtime Bugs Discovered: ${newCount}`,
+    ];
+
+    if (runtimeFindings.length > 0) {
+      sections.push(`\n### ⚡ Runtime Verified Findings:\n`);
+      sections.push(formatRuntimeFindings(runtimeFindings));
+    }
+
+    if (staticResults.length > 0) {
+      sections.push(`\n### 📋 Static Analysis Results:\n`);
+      for (const res of staticResults) {
+        sections.push(LLMFormatter.formatForLLMPrompt(res));
+      }
+    }
+
+    return sections.join("\n");
+  }
 }
+
+/**
+ * Formats runtime findings into Markdown.
+ */
+export function formatRuntimeFindings(findings: RuntimeFinding[]): string {
+  if (findings.length === 0) {
+    return "No runtime issues detected in test execution.";
+  }
+
+  return findings
+    .map((f) => {
+      const traceLines = f.trace
+        .map((e) => `  - ${e.type}: ${JSON.stringify(e)}`)
+        .join("\n");
+
+      return `### [${f.severity}] ${f.ruleId}: ${f.message}
+- **File**: \`${f.filePath}:${f.loc.start.line}\`
+- **Confidence**: **${f.confidence}**
+- **Confirmed By**: \`${f.confirmedBy}\`
+${f.staticFinding ? `- **Correlated Static Rule**: \`${f.staticFinding.ruleId}\`` : ""}
+
+**Trace Evidence**:
+${traceLines}`;
+    })
+    .join("\n\n");
+}
+
