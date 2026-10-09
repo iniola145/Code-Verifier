@@ -755,13 +755,42 @@ export const AvailableSchemaNotAppliedRule: VerificationRule = {
     traverse(ctx.ast, {
       Function(path) {
         const text = path.toString();
-        if (
-          !/(?:await\s+.*\.(?:get|post|put|patch|delete)\s*\(|await\s+fetch\s*\()/s.test(
-            text,
-          )
-        )
-          return;
-        if (!/return\s+\w+\.data\b/.test(text)) return;
+        let returnsRawRequestData = false;
+        path.traverse({
+          ReturnStatement(returnPath) {
+            let member = returnPath.node.argument;
+            let responseName: string | null = null;
+            while (t.isMemberExpression(member) && !member.computed) {
+              if (
+                t.isIdentifier(member.object) &&
+                t.isIdentifier(member.property, { name: "data" })
+              ) {
+                responseName = member.object.name;
+                break;
+              }
+              member = member.object;
+            }
+            if (!responseName) return;
+
+            const binding = returnPath.scope.getBinding(responseName);
+            if (!binding?.path.isVariableDeclarator()) return;
+            const init = binding.path.node.init;
+            if (!t.isAwaitExpression(init) || !t.isCallExpression(init.argument))
+              return;
+
+            const callee = init.argument.callee;
+            const isFetch = t.isIdentifier(callee, { name: "fetch" });
+            const isHttpClientMethod =
+              t.isMemberExpression(callee) &&
+              !callee.computed &&
+              t.isIdentifier(callee.property) &&
+              ["get", "post", "put", "patch", "delete"].includes(
+                callee.property.name,
+              );
+            if (isFetch || isHttpClientMethod) returnsRawRequestData = true;
+          },
+        });
+        if (!returnsRawRequestData) return;
         if (
           [...schemas].some((schema) =>
             new RegExp(

@@ -26,6 +26,8 @@ import {
   ScanCache,
 } from "./scan-cache";
 import { RULE_REGISTRY } from "./rules/registry";
+import { generateTests } from "./test-gen/generator";
+import { OutputMode, TestFramework } from "./test-gen/types";
 
 const SOURCE_EXTENSIONS = new Set([
   ".ts",
@@ -136,6 +138,11 @@ Options:
   --workers=N        Bound concurrent file scheduling (default: available CPUs, max 8)
   --cache[=FILE]     Reuse unchanged results from a persistent cache
   --changed          Analyze only Git changed/untracked source files
+  --generate-tests[=TARGET]  Generate runnable test suites from static analysis facts
+  --output=DIR               Output directory for generated tests (default: .verifier/tests)
+  --framework=NAME           Target test framework: jest | vitest | detox (auto-detected)
+  --rule=RULE_ID             Filter generation to a specific rule ID (e.g. AI-NULL-001)
+  --in-place                 Write generated test files alongside target files
   --list-rules       Print the complete rule catalog (add --json for metadata)
   --help, -h         Show this help message
 
@@ -182,8 +189,52 @@ Examples:
     process.exit(2);
   }
 
+  function getFlag(cliArgs: string[], name: string): string | undefined {
+    for (let i = 0; i < cliArgs.length; i++) {
+      const a = cliArgs[i];
+      if (a === name) {
+        if (i + 1 < cliArgs.length && !cliArgs[i + 1].startsWith("--")) {
+          return cliArgs[i + 1];
+        }
+        return "";
+      }
+      if (a.startsWith(`${name}=`)) {
+        return a.slice(name.length + 1);
+      }
+    }
+    return undefined;
+  }
+
+  function getPositionalTargets(cliArgs: string[]): string[] {
+    const flagsWithValue = new Set([
+      "--format",
+      "--disable",
+      "--fail-on",
+      "--baseline",
+      "--write-baseline",
+      "--workers",
+      "--output",
+      "--framework",
+      "--rule",
+    ]);
+
+    const posTargets: string[] = [];
+    for (let i = 0; i < cliArgs.length; i++) {
+      const a = cliArgs[i];
+      if (a.startsWith("--")) {
+        const flagName = a.split("=")[0];
+        if (flagsWithValue.has(flagName) && !a.includes("=")) {
+          i++;
+        }
+      } else {
+        posTargets.push(a);
+      }
+    }
+    return posTargets;
+  }
+
   // Config is discovered upward from the first target (or cwd for --stdin).
-  const targets = args.filter((a) => !a.startsWith("--"));
+  const targets = getPositionalTargets(args);
   const configStart = isStdin
     ? process.cwd()
     : targets[0] &&
@@ -238,6 +289,61 @@ Examples:
       console.error(`Baseline error: ${error.message}`);
       process.exit(2);
     }
+  }
+
+  const isGenerateTests =
+    args.includes("--generate-tests") ||
+    args.some((a) => a.startsWith("--generate-tests="));
+
+  if (isGenerateTests) {
+    const genTargetFlag = getFlag(args, "--generate-tests");
+    const genTargets =
+      genTargetFlag && genTargetFlag !== ""
+        ? [genTargetFlag]
+        : targets;
+
+    if (genTargets.length === 0) {
+      console.error(
+        "Error: No target file or directory specified for --generate-tests.",
+      );
+      process.exit(1);
+    }
+
+    const outputDir = getFlag(args, "--output") || ".verifier/tests";
+    const framework = getFlag(args, "--framework") as TestFramework | undefined;
+    const ruleFilterVal = getFlag(args, "--rule");
+    const ruleFilter = ruleFilterVal ? [ruleFilterVal] : undefined;
+    const mode: OutputMode = args.includes("--in-place")
+      ? "in-place"
+      : "directory";
+
+    const files = expandTargets(genTargets, config.exclude);
+    const results = await generateTests(files, {
+      framework,
+      outputDir,
+      mode,
+      ruleFilter,
+      includeSetup: true,
+      projectRoot,
+    });
+
+    for (const result of results) {
+      if (mode === "in-place") {
+        fs.writeFileSync(result.filePath, result.content, "utf-8");
+        console.log(`Wrote ${result.filePath}`);
+      } else {
+        const outputPath = path.join(
+          outputDir,
+          path.basename(result.filePath),
+        );
+        fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+        fs.writeFileSync(outputPath, result.content, "utf-8");
+        console.log(`Wrote ${outputPath}`);
+      }
+    }
+
+    console.log(`Generated ${results.length} test file(s)`);
+    process.exit(0);
   }
 
   let verifier = new CodeVerifier({

@@ -28,6 +28,16 @@ import * as os from "os";
 import { SemanticAnalysisIndex } from "../src/semantic-analysis";
 import { ImportGraphIndex } from "../src/unused-files";
 import { ProjectUiIndex } from "../src/project-ui-index";
+import {
+  AsyncPatternStrategy,
+  detectFramework,
+  generateMockCode,
+  generateTests,
+  generateTestsForFile,
+  RaceConditionStrategy,
+  synthesizeMocks,
+} from "../src/test-gen";
+import { parseSourceCode } from "../src/parser/ast";
 
 /** Recursively collects source files under dir, skipping node_modules/dist/.git. */
 function expandAllFiles(dir: string): string[] {
@@ -2298,6 +2308,26 @@ async function runTests() {
     );
   }
   {
+    const result = await verifier.verifyCode(
+      `import { PhotoPresignSchema } from './schemas'; export async function uploadPhoto(file: File) { const presign = await apiRequest('/photo/presign', { schema: PhotoPresignSchema }); const response = await fetch(presign.data.upload_url, { method: 'PUT', body: file }); if (!response.ok) throw new Error('upload failed'); return presign.data.public_url; }`,
+      "src/services/photoApi.ts",
+    );
+    assert(
+      !result.diagnostics.some((d) => d.ruleId === "SERVICE-006"),
+      "Binary upload does not make validated presign data look like a raw response",
+    );
+  }
+  {
+    const result = await verifier.verifyCode(
+      `import { UserSchema } from './schemas'; export async function getUserName() { const response = await api.get('/user'); return response.data.name; }`,
+      "src/services/userApi.ts",
+    );
+    assert(
+      result.diagnostics.some((d) => d.ruleId === "SERVICE-006"),
+      "Nested raw response data is still flagged",
+    );
+  }
+  {
     const fixtureRoot = path.resolve(__dirname, "fixtures/project-summaries");
     const helper = path.join(fixtureRoot, "coordinated-refresh.fixture");
     const consumer = path.join(fixtureRoot, "refresh-consumer.fixture");
@@ -3639,6 +3669,236 @@ async function runTests() {
     assert(
       invalidConfig.errors.length === 2,
       "Invalid and unknown configuration values are rejected",
+    );
+  }
+
+  // =========================================================================
+  // Phase 2A: Test Generation from Static Facts
+  // =========================================================================
+  console.log("— Phase 2A: Test Generation");
+  {
+    // 1. Mock Synthesizer for well-known packages
+    const codeWithNav = `
+      import { useNavigation, useRoute } from '@react-navigation/native';
+      import { useRouter } from 'expo-router';
+      import AsyncStorage from '@react-native-async-storage/async-storage';
+      import { WebView } from 'react-native-webview';
+      import { login, fetchUser } from './api';
+      import unknownPkg from 'unknown-library';
+
+      export function Screen() {}
+    `;
+    const { ast: navAst } = parseSourceCode(codeWithNav, "Screen.tsx");
+    const jestMocks = synthesizeMocks(navAst, "jest");
+    const jestMockCode = generateMockCode(jestMocks, "jest");
+
+    assert(
+      jestMockCode.includes("jest.mock('@react-navigation/native'") &&
+        jestMockCode.includes("useNavigation"),
+      "Mock synthesizer generates Jest mocks for @react-navigation/native",
+    );
+    assert(
+      jestMockCode.includes("jest.mock('expo-router'") &&
+        jestMockCode.includes("useRouter"),
+      "Mock synthesizer generates Jest mocks for expo-router",
+    );
+    assert(
+      jestMockCode.includes("jest.mock('@react-native-async-storage/async-storage'") &&
+        jestMockCode.includes("getItem: jest.fn"),
+      "Mock synthesizer generates default export mock for AsyncStorage",
+    );
+    assert(
+      jestMockCode.includes("jest.mock('react-native-webview'"),
+      "Mock synthesizer generates mock for react-native-webview",
+    );
+    assert(
+      jestMockCode.includes("jest.mock('./api'") &&
+        jestMockCode.includes("login: jest.fn()") &&
+        jestMockCode.includes("fetchUser: jest.fn()"),
+      "Mock synthesizer generates named mocks for relative imports",
+    );
+    assert(
+      jestMockCode.includes("jest.mock('unknown-library'"),
+      "Mock synthesizer handles unknown 3rd party packages with fallback placeholder",
+    );
+
+    // Vitest mocks
+    const vitestMocks = synthesizeMocks(navAst, "vitest");
+    const vitestMockCode = generateMockCode(vitestMocks, "vitest");
+    assert(
+      vitestMockCode.includes("vi.mock('@react-navigation/native'") &&
+        vitestMockCode.includes("vi.fn()"),
+      "Mock synthesizer generates Vitest mocks with vi.mock/vi.fn",
+    );
+
+    // 2. Framework Auto-detection
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), "fw-detect-"));
+    fs.writeFileSync(
+      path.join(testDir, "package.json"),
+      JSON.stringify({ devDependencies: { vitest: "^1.0.0" } }),
+    );
+    assert(
+      detectFramework(testDir) === "vitest",
+      "detectFramework identifies Vitest from devDependencies",
+    );
+
+    fs.writeFileSync(
+      path.join(testDir, "package.json"),
+      JSON.stringify({ dependencies: { "react-native": "0.74.0", jest: "^29.0.0" } }),
+    );
+    assert(
+      detectFramework(testDir) === "jest",
+      "detectFramework identifies Jest for React Native projects",
+    );
+
+    // 3. Nullability Test Generation (AI-NULL-001)
+    const nullCode = `
+      export function getUser(id: string) {
+        const user: any = null;
+        return user.name;
+      }
+    `;
+    const genNullTest = await generateTestsForFile(
+      "src/getUser.ts",
+      { framework: "jest", mode: "directory" },
+      nullCode,
+    );
+    assert(
+      genNullTest.content.includes("should handle null") &&
+        genNullTest.content.includes("getUser") &&
+        genNullTest.content.includes("AI-NULL-001"),
+      "NullabilityStrategy generates null handling test for AI-NULL-001",
+    );
+    assert(
+      (() => {
+        try {
+          parseSourceCode(genNullTest.content, "getUser.test.ts");
+          return true;
+        } catch {
+          return false;
+        }
+      })(),
+      "Generated nullability test is syntactically valid TypeScript",
+    );
+
+    // 4. Component Contract Test Generation (COMP-001)
+    const compContractCode = `
+      import React from 'react';
+      import { UserCard } from './UserCard';
+      export function Page() {
+        return <UserCard />;
+      }
+    `;
+    const genCompTest = await generateTestsForFile(
+      "src/Page.tsx",
+      { framework: "jest", mode: "directory" },
+      compContractCode,
+    );
+    assert(
+      genCompTest.content.includes("describe('Page'") ||
+        genCompTest.content.includes("describe('Page.test'"),
+      "ComponentContractStrategy generates test file for component consumer",
+    );
+
+    // 5. End-to-end Test Generation on VulnerableScreen.tsx
+    const vulnTest = await generateTestsForFile("samples/VulnerableScreen.tsx", {
+      framework: "jest",
+      mode: "directory",
+    });
+    assert(
+      vulnTest.testCases.length >= 3,
+      "generateTestsForFile on samples/VulnerableScreen.tsx catches multiple findings",
+    );
+    assert(
+      vulnTest.content.includes("AsyncStorage") &&
+        vulnTest.content.includes("RN-SEC-001") &&
+        vulnTest.content.includes("AsyncStorage.setItem") &&
+        vulnTest.content.includes("AI-NULL-001") &&
+        vulnTest.content.includes("AI-TAINT-001"),
+      "Generated test for VulnerableScreen covers security (setItem), nullability, and taint findings",
+    );
+    assert(
+      (() => {
+        try {
+          parseSourceCode(vulnTest.content, "VulnerableScreen.test.tsx");
+          return true;
+        } catch {
+          return false;
+        }
+      })(),
+      "Generated VulnerableScreen test is 100% syntactically valid TypeScript/JSX",
+    );
+
+    // 6. Multi-file Directory Generation with Options
+    const outDir = path.join(testDir, "generated-tests");
+    const multiResults = await generateTests(["samples/VulnerableScreen.tsx"], {
+      outputDir: outDir,
+      framework: "jest",
+      mode: "directory",
+      includeSetup: true,
+    });
+    assert(
+      multiResults.length === 1 &&
+        multiResults[0].sourceFile.includes("VulnerableScreen.tsx"),
+      "generateTests produces generated test results for target files",
+    );
+
+    // 7. RaceConditionStrategy exercises target component
+    const raceFinding: any = {
+      ruleId: "RACE-001",
+      message: "Potential race condition in asynchronous state update",
+      severity: "HIGH",
+      confidence: 0.85,
+      loc: { start: { line: 1, column: 0 }, end: { line: 1, column: 10 } },
+    };
+    const raceContext: any = {
+      sourceFile: "/app/FeedScreen.tsx",
+      code: "export function FeedScreen({ category }: { category: string }) { return null; }",
+      ast: parseSourceCode(
+        "export function FeedScreen({ category }: { category: string }) { return null; }",
+        "FeedScreen.tsx",
+      ).ast,
+      findings: [raceFinding],
+      contracts: [],
+      functionSummaries: [],
+      framework: "jest",
+    };
+    const raceTests = RaceConditionStrategy.generate(raceContext, raceFinding);
+    assert(
+      raceTests.length > 0 &&
+        raceTests[0].body.includes("<FeedScreen") &&
+        raceTests[0].body.includes("rerender"),
+      "RaceConditionStrategy renders the component and exercises concurrent updates",
+    );
+
+    // 8. AsyncPatternStrategy exercises target component error pathways
+    const asyncFinding: any = {
+      ruleId: "ASYNC-001",
+      message: "Unhandled promise rejection in async action",
+      severity: "HIGH",
+      confidence: 0.85,
+      loc: { start: { line: 1, column: 0 }, end: { line: 1, column: 10 } },
+    };
+    const asyncTests = AsyncPatternStrategy.generate(raceContext, asyncFinding);
+    assert(
+      asyncTests.length > 0 &&
+        asyncTests[0].body.includes("<FeedScreen") &&
+        asyncTests[0].body.includes("toJSON"),
+      "AsyncPatternStrategy renders the component to verify graceful error handling",
+    );
+
+    // 9. Re-export mock synthesis
+    const reExportCode = `
+      export { Button, Badge } from './ui-components';
+    `;
+    const reExportAst = parseSourceCode(reExportCode, "index.ts").ast;
+    const reExportMocks = synthesizeMocks(reExportAst, "jest");
+    const reExportMockCode = generateMockCode(reExportMocks, "jest");
+    assert(
+      reExportMockCode.includes("jest.mock('./ui-components'") &&
+        reExportMockCode.includes("Button: jest.fn()") &&
+        reExportMockCode.includes("Badge: jest.fn()"),
+      "Mock synthesizer captures export ... from re-exports",
     );
   }
 

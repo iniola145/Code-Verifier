@@ -1,6 +1,8 @@
 import * as readline from "readline";
 import { CodeVerifier } from "./engine";
 import { LLMFormatter } from "./formatter/llm-formatter";
+import { generateTestsForFile } from "./test-gen/generator";
+import { TestFramework } from "./test-gen/types";
 
 /**
  * Lightweight JSON-RPC Model Context Protocol (MCP) Server
@@ -75,6 +77,36 @@ class MCPServer {
               required: ["code"],
             },
           },
+          {
+            name: "generate_tests",
+            description:
+              "Generate test suite from static analysis. Returns test file content.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                filePath: {
+                  type: "string",
+                  description: "Source file to generate tests for",
+                },
+                code: {
+                  type: "string",
+                  description:
+                    "Optional source code if not reading from file directly",
+                },
+                framework: {
+                  type: "string",
+                  enum: ["jest", "vitest", "detox"],
+                  description: "Test framework (auto-detected if not specified)",
+                },
+                ruleFilter: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "Only generate tests for these rule IDs",
+                },
+              },
+              required: ["filePath"],
+            },
+          },
         ],
       });
       return;
@@ -111,6 +143,47 @@ class MCPServer {
               {
                 type: "text",
                 text: `Error verifying code: ${err.message}`,
+              },
+            ],
+            isError: true,
+          });
+        }
+        return;
+      }
+
+      if (toolName === "generate_tests") {
+        const filePath = args.filePath || "Component.tsx";
+        const framework = args.framework as TestFramework | undefined;
+        const ruleFilter = args.ruleFilter;
+        const code = args.code;
+
+        try {
+          const result = await generateTestsForFile(
+            filePath,
+            {
+              framework,
+              mode: "directory",
+              ruleFilter,
+              includeSetup: true,
+            },
+            code,
+          );
+
+          this.sendResponse(id, {
+            content: [
+              {
+                type: "text",
+                text: result.content,
+              },
+            ],
+            isError: false,
+          });
+        } catch (err: any) {
+          this.sendResponse(id, {
+            content: [
+              {
+                type: "text",
+                text: `Error generating tests: ${err.message}`,
               },
             ],
             isError: true,

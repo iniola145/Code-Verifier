@@ -34,3 +34,8 @@ export * from "./rules/backend-rules";
 export * from "./rules/deployment-rules";
 export * from "./deployment-config";
 export * from "./scan-cache";
+export * from "./test-gen/types";
+export * from "./test-gen/generator";
+export * from "./test-gen/strategies";
+export * from "./test-gen/templates";
+export * from "./test-gen/mock-synthesizer";
