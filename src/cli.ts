@@ -42,6 +42,8 @@ import {
 } from "./tdr/session-manager";
 import { verifyFix } from "./tdr/fix-verifier";
 import { instrumentCode } from "./instrument/plugin";
+import { startUITestSession } from "./ui-test/session";
+import { generateBugReport } from "./ui-test/reporter";
 
 const SOURCE_EXTENSIONS = new Set([
   ".ts",
@@ -173,6 +175,8 @@ Options:
   --clean-tdr[=all]          Clean/prune stored TDR sessions (--clean-tdr=all for full cleanup)
   --instrument[=TARGET]      Inject selective runtime probes at flagged locations
   --probe-output=FILE        Specify output trace file for runtime probes
+  --ui-test[=TARGET]         Run LLM-driven UI tests using Playwright or Detox
+  --flows=LIST               Comma-separated user flows to test (e.g. login,signup)
   --list-rules       Print the complete rule catalog (add --json for metadata)
   --help, -h         Show this help message
 
@@ -255,6 +259,8 @@ Examples:
       "--tdr-status",
       "--instrument",
       "--probe-output",
+      "--ui-test",
+      "--flows",
     ]);
 
     const posTargets: string[] = [];
@@ -478,6 +484,46 @@ Examples:
       `Instrumented ${instrumentedFiles.length} file(s) in ${instrumentOutput}`,
     );
     process.exit(0);
+  }
+
+  // =========================================================================
+  // Phase 2E: LLM-Driven UI Testing
+  // =========================================================================
+  const isUiTest =
+    args.includes("--ui-test") ||
+    args.some((a) => a.startsWith("--ui-test="));
+
+  if (isUiTest) {
+    const uiTargetFlag = getFlag(args, "--ui-test");
+    const target =
+      uiTargetFlag && uiTargetFlag !== "" ? uiTargetFlag : targets[0];
+    if (!target) {
+      console.error("Error: No target specified for --ui-test.");
+      process.exit(1);
+    }
+
+    const uiFramework = (getFlag(args, "--framework") || "playwright") as
+      | "playwright"
+      | "detox";
+    const uiFlows = getFlag(args, "--flows");
+
+    const session = await startUITestSession({
+      framework: uiFramework,
+      target,
+      flows: uiFlows
+        ? uiFlows.split(",").map((f) => f.trim()).filter(Boolean)
+        : undefined,
+    });
+
+    console.log(`UI Test Session: ${session.id}`);
+    console.log(`Status: ${session.status}`);
+    console.log(`Steps: ${session.steps.length}`);
+    console.log(`Bugs Found: ${session.bugs.length}`);
+
+    const report = generateBugReport(session);
+    console.log(report);
+
+    process.exit(session.bugs.length > 0 ? 1 : 0);
   }
 
   // =========================================================================

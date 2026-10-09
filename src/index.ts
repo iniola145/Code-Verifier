@@ -49,3 +49,7 @@ export * from "./tdr/fix-verifier";
 export * from "./instrument/probe-templates";
 export * from "./instrument/runtime";
 export * from "./instrument/plugin";
+export * from "./ui-test/session";
+export * from "./ui-test/driver";
+export * from "./ui-test/observer";
+export * from "./ui-test/reporter";

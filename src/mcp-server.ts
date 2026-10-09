@@ -9,6 +9,8 @@ import { generateTestsForFile } from "./test-gen/generator";
 import { TestFramework } from "./test-gen/types";
 import { createSession, loadSession, updateSession } from "./tdr/session-manager";
 import { verifyFix } from "./tdr/fix-verifier";
+import { startUITestSession, stopUITestSession, getUITestSession } from "./ui-test/session";
+import { generateBugReport } from "./ui-test/reporter";
 
 /**
  * Lightweight JSON-RPC Model Context Protocol (MCP) Server
@@ -190,6 +192,47 @@ class MCPServer {
                 sessionId: {
                   type: "string",
                   description: "TDR session ID",
+                },
+              },
+              required: ["sessionId"],
+            },
+          },
+          {
+            name: "start_ui_session",
+            description:
+              "Start a UI test session. Returns session ID and initial state.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                target: {
+                  type: "string",
+                  description: "Target app to test",
+                },
+                framework: {
+                  type: "string",
+                  enum: ["playwright", "detox"],
+                  description: "UI testing framework",
+                  default: "playwright",
+                },
+                flows: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "User flows to test",
+                },
+              },
+              required: ["target"],
+            },
+          },
+          {
+            name: "stop_ui_session",
+            description:
+              "Stop a UI test session and return the bug report.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                sessionId: {
+                  type: "string",
+                  description: "UI test session ID",
                 },
               },
               required: ["sessionId"],
@@ -487,6 +530,91 @@ class MCPServer {
               {
                 type: "text",
                 text: `Error getting TDR status: ${err.message}`,
+              },
+            ],
+            isError: true,
+          });
+        }
+        return;
+      }
+
+      if (toolName === "start_ui_session") {
+        const { target, framework, flows } = args;
+
+        try {
+          if (!target) {
+            throw new Error("target is required");
+          }
+
+          const session = await startUITestSession({
+            framework: framework as "playwright" | "detox",
+            target,
+            flows,
+          });
+
+          this.sendResponse(id, {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    sessionId: session.id,
+                    status: session.status,
+                    steps: session.steps.length,
+                    bugs: session.bugs.length,
+                  },
+                  null,
+                  2,
+                ),
+              },
+            ],
+            isError: false,
+          });
+        } catch (err: any) {
+          this.sendResponse(id, {
+            content: [
+              {
+                type: "text",
+                text: `Error starting UI session: ${err.message}`,
+              },
+            ],
+            isError: true,
+          });
+        }
+        return;
+      }
+
+      if (toolName === "stop_ui_session") {
+        const { sessionId } = args;
+
+        try {
+          if (!sessionId) {
+            throw new Error("sessionId is required");
+          }
+
+          await stopUITestSession(sessionId);
+          const session = getUITestSession(sessionId);
+
+          if (!session) {
+            this.sendResponse(id, {
+              content: [{ type: "text", text: "Session not found" }],
+              isError: true,
+            });
+            return;
+          }
+
+          const report = generateBugReport(session);
+
+          this.sendResponse(id, {
+            content: [{ type: "text", text: report }],
+            isError: session.bugs.length > 0,
+          });
+        } catch (err: any) {
+          this.sendResponse(id, {
+            content: [
+              {
+                type: "text",
+                text: `Error stopping UI session: ${err.message}`,
               },
             ],
             isError: true,

@@ -65,6 +65,21 @@ import {
   instrumentCode,
   instrumentFile,
   codeVerifierInstrumentPlugin,
+  startUITestSession,
+  stopUITestSession,
+  getUITestSession,
+  clearUITestSessions,
+  createPlaywrightDriver,
+  createDetoxDriver,
+  SimulatedUIDriver,
+  observeUI,
+  buildObservationPrompt,
+  parseObservationResponse,
+  generateBugReport,
+  UITestSession,
+  UIBug,
+  UISTep,
+  UIDriver,
 } from "../src";
 import CodeVerifierReporter from "../src/adapters/jest-reporter";
 import codeVerifierPlugin from "../src/adapters/vitest-plugin";
@@ -4789,6 +4804,274 @@ getCity({});
 
     try {
       fs.rmSync(tempCliDir, { recursive: true, force: true });
+    } catch {}
+
+    // =========================================================================
+    // Phase 2E: LLM-Driven UI Testing
+    // =========================================================================
+    console.log("— Phase 2E: LLM-Driven UI Testing");
+
+    // 1. Driver abstraction: Playwright and Detox driver implementations
+    const pwDriver = await createPlaywrightDriver();
+    assert(
+      typeof pwDriver.navigate === "function" &&
+        typeof pwDriver.click === "function" &&
+        typeof pwDriver.type === "function" &&
+        typeof pwDriver.screenshot === "function" &&
+        typeof pwDriver.getCurrentLocation === "function" &&
+        typeof pwDriver.waitFor === "function" &&
+        typeof pwDriver.isVisible === "function" &&
+        typeof pwDriver.getText === "function" &&
+        typeof pwDriver.scrollTo === "function" &&
+        typeof pwDriver.close === "function",
+      "Playwright driver implements the complete UIDriver interface",
+    );
+
+    const detoxDriver = await createDetoxDriver();
+    assert(
+      typeof detoxDriver.navigate === "function" &&
+        typeof detoxDriver.click === "function" &&
+        typeof detoxDriver.type === "function" &&
+        typeof detoxDriver.screenshot === "function" &&
+        typeof detoxDriver.getCurrentLocation === "function" &&
+        typeof detoxDriver.waitFor === "function" &&
+        typeof detoxDriver.isVisible === "function" &&
+        typeof detoxDriver.getText === "function" &&
+        typeof detoxDriver.scrollTo === "function" &&
+        typeof detoxDriver.close === "function",
+      "Detox driver implements the complete UIDriver interface",
+    );
+
+    // Simulated driver interactions
+    const simDriver = new SimulatedUIDriver({
+      initialLocation: "/home",
+      elements: {
+        "#login-btn": { selector: "#login-btn", visible: true, text: "Log In" },
+        "input[name='email']": { selector: "input[name='email']", visible: true, text: "", value: "" },
+      },
+    });
+
+    await simDriver.navigate("/dashboard");
+    assert((await simDriver.getCurrentLocation()) === "/dashboard", "UIDriver.navigate updates current location");
+
+    assert((await simDriver.isVisible("#login-btn")) === true, "UIDriver.isVisible checks element visibility");
+    assert((await simDriver.getText("#login-btn")) === "Log In", "UIDriver.getText retrieves element text");
+
+    await simDriver.type("input[name='email']", "user@example.com");
+    await simDriver.click("#login-btn");
+    await simDriver.scrollTo("#footer");
+    await simDriver.waitFor("#login-btn", 100);
+
+    const shot = await simDriver.screenshot();
+    assert(typeof shot === "string" && shot.startsWith("data:image/png;base64,"), "UIDriver.screenshot returns base64 PNG data");
+
+    await simDriver.close();
+
+    // 2. LLM Observer: Prompt Building and Response Parsing
+    const testPrompt = buildObservationPrompt({
+      screenshot: "data:image/png;base64,abc",
+      location: "/checkout",
+      previousSteps: [{ id: 1, action: "navigate to /cart", timestamp: Date.now() }],
+      currentFlow: "payment_flow",
+    });
+
+    assert(
+      testPrompt.includes("Current screen: /checkout") &&
+        testPrompt.includes("Current flow: payment_flow") &&
+        testPrompt.includes("Visual bugs") &&
+        testPrompt.includes("UX bugs"),
+      "buildObservationPrompt generates formatted prompt with location, flow, and categories",
+    );
+
+    // JSON response parsing
+    const mockJsonResponse = JSON.stringify({
+      observation: "Checkout button overlaps with billing address input field.",
+      bugs: [
+        {
+          id: "bug-101",
+          severity: "high",
+          category: "visual",
+          description: "Checkout button overlaps with billing address input field",
+          reproductionSteps: ["Navigate to /checkout", "Scroll down to submit"],
+        },
+      ],
+      nextAction: "click #pay-button",
+    });
+
+    const parsedJson = parseObservationResponse(mockJsonResponse);
+    assert(
+      parsedJson.observation.includes("Checkout button overlaps") &&
+        parsedJson.bugs.length === 1 &&
+        parsedJson.bugs[0].severity === "high" &&
+        parsedJson.bugs[0].category === "visual" &&
+        parsedJson.nextAction === "click #pay-button",
+      "parseObservationResponse parses structured JSON responses into UIBug objects",
+    );
+
+    // Markdown response parsing
+    const mockMdResponse = `
+1. Observation: Form is submitted but no progress spinner is displayed.
+2. Bugs:
+- [HIGH] UX: No feedback or loading indicator after form submission
+- [MEDIUM] Visual: Button text truncated on small screens
+3. Next action: type input[name='search'] query
+`;
+    const parsedMd = parseObservationResponse(mockMdResponse);
+    assert(
+      parsedMd.bugs.length === 2 &&
+        parsedMd.bugs[0].severity === "high" &&
+        parsedMd.bugs[0].category === "ux" &&
+        parsedMd.bugs[1].severity === "medium" &&
+        parsedMd.bugs[1].category === "visual",
+      "parseObservationResponse parses structured Markdown text format into UIBug objects",
+    );
+
+    // observeUI with mock LLM caller
+    const mockDriver = new SimulatedUIDriver({ initialLocation: "/profile" });
+    const llmObservation = await observeUI(mockDriver, {
+      previousSteps: [],
+      currentFlow: "profile_edit",
+      llmCaller: async () => mockJsonResponse,
+    });
+    assert(
+      llmObservation.bugs.length === 1 &&
+        llmObservation.bugs[0].id === "bug-101" &&
+        llmObservation.nextAction === "click #pay-button",
+      "observeUI queries LLM caller and returns parsed observations and bugs",
+    );
+
+    // 3. Session Management
+    clearUITestSessions();
+    const testSession = await startUITestSession({
+      framework: "playwright",
+      target: "/settings",
+      flows: ["account", "security"],
+      driver: new SimulatedUIDriver({ initialLocation: "/settings" }),
+    });
+
+    assert(
+      testSession.id.startsWith("ui-session-") &&
+        testSession.status === "completed" &&
+        testSession.framework === "playwright" &&
+        testSession.target === "/settings" &&
+        testSession.steps.length >= 2,
+      "startUITestSession initializes, runs flows, and records steps",
+    );
+
+    const loadedSession = getUITestSession(testSession.id);
+    assert(
+      loadedSession !== null && loadedSession.id === testSession.id,
+      "getUITestSession retrieves session by ID",
+    );
+
+    await stopUITestSession(testSession.id);
+    assert(
+      getUITestSession(testSession.id)?.status === "completed",
+      "stopUITestSession finalizes session status",
+    );
+
+    // 4. Bug Reporter
+    const sampleBug: UIBug = {
+      id: "bug-ui-1",
+      severity: "high",
+      category: "visual",
+      description: "Button text is truncated on small screens",
+      location: "/src/components/SubmitButton.tsx",
+      screenshot: "data:image/png;base64,xyz",
+      reproductionSteps: ["Navigate to login screen", "Observe submit button"],
+    };
+
+    const bugSession: UITestSession = {
+      id: "session-xyz",
+      framework: "playwright",
+      target: "/login",
+      status: "completed",
+      steps: [{ id: 1, action: "navigate to /login", timestamp: Date.now() }],
+      bugs: [sampleBug],
+      startedAt: new Date(Date.now() - 2500).toISOString(),
+      completedAt: new Date().toISOString(),
+    };
+
+    const bugReport = generateBugReport(bugSession);
+    assert(
+      bugReport.includes("# UI Test Report") &&
+        bugReport.includes("**Session:** session-xyz") &&
+        bugReport.includes("**Bugs Found:** 1") &&
+        bugReport.includes("### 1. [HIGH] Visual: Button text is truncated on small screens") &&
+        bugReport.includes("- **Location:** /src/components/SubmitButton.tsx") &&
+        bugReport.includes("- High: 1") &&
+        bugReport.includes("- Critical: 0"),
+      "generateBugReport produces clean Markdown report with bug details and summary counts",
+    );
+
+    // Clean session report
+    const cleanBugSession: UITestSession = {
+      ...bugSession,
+      id: "session-clean",
+      bugs: [],
+    };
+    const cleanReport = generateBugReport(cleanBugSession);
+    assert(
+      cleanReport.includes("No UI bugs detected across tested flows.") &&
+        cleanReport.includes("- High: 0"),
+      "generateBugReport produces clean summary when no bugs are detected",
+    );
+
+    // 5. Real Bug Detection in a Test Component
+    const tempUiDir = path.join(os.tmpdir(), `cv-ui-test-${Date.now()}`);
+    fs.mkdirSync(tempUiDir, { recursive: true });
+    const buggyComponentFile = path.join(tempUiDir, "BuggyCard.tsx");
+    fs.writeFileSync(
+      buggyComponentFile,
+      `import React from 'react';
+export function BuggyCard() {
+  return (
+    <div style={{ width: 25, overflow: 'hidden' }}>
+      <button style={{ width: 20 }}>Long Action Label That Truncates</button>
+      <form>
+        <button type="submit">Submit</button>
+      </form>
+    </div>
+  );
+}`,
+      "utf-8",
+    );
+
+    const buggySession = await startUITestSession({
+      framework: "playwright",
+      target: buggyComponentFile,
+      flows: ["initial_view"],
+    });
+
+    assert(
+      buggySession.bugs.length >= 1 &&
+        buggySession.bugs.some(
+          (b) => b.category === "visual" || b.category === "ux" || b.category === "functional",
+        ),
+      "startUITestSession detects real visual/UX bugs in buggy target component",
+    );
+
+    // 6. CLI Integration: --ui-test flag execution
+    const cliScriptPath = path.resolve(__dirname, "../src/cli.ts");
+    let cliUiOutput = "";
+    try {
+      cliUiOutput = execSync(
+        `npx ts-node "${cliScriptPath}" --ui-test "${buggyComponentFile}" --framework=playwright`,
+        { encoding: "utf-8" },
+      );
+    } catch (err: any) {
+      cliUiOutput = err.stdout || err.message;
+    }
+
+    assert(
+      cliUiOutput.includes("UI Test Session:") &&
+        cliUiOutput.includes("Bugs Found:") &&
+        cliUiOutput.includes("# UI Test Report"),
+      "CLI --ui-test flag executes UI test session and outputs bug report",
+    );
+
+    try {
+      fs.rmSync(tempUiDir, { recursive: true, force: true });
     } catch {}
   }
 
