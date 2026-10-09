@@ -2,29 +2,9 @@ import * as fs from "fs";
 import * as path from "path";
 import { Diagnostic } from "../types/verifier";
 import { GeneratedTest } from "../test-gen/types";
-import { FixVerificationResult } from "./fix-verifier";
+import { TDRSession, TDRStatus, FixVerificationResult } from "./types";
 
-export type TDRStatus =
-  | "pending"
-  | "tests_generated"
-  | "tests_failing"
-  | "fixed"
-  | "verified";
-
-/**
- * A TDR (Test-Driven Remediation) session.
- */
-export interface TDRSession {
-  id: string;
-  createdAt: string;
-  sourceFile: string;
-  originalFindings: Diagnostic[];
-  generatedTests: GeneratedTest[];
-  status: TDRStatus;
-  fixCommit?: string;
-  verificationResult?: FixVerificationResult;
-  existingTestFound?: string;
-}
+export { TDRSession, TDRStatus, FixVerificationResult };
 
 let customSessionDir: string | null = null;
 

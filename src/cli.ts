@@ -41,6 +41,7 @@ import {
   cleanAllSessions,
 } from "./tdr/session-manager";
 import { verifyFix } from "./tdr/fix-verifier";
+import { instrumentCode } from "./instrument/plugin";
 
 const SOURCE_EXTENSIONS = new Set([
   ".ts",
@@ -170,6 +171,8 @@ Options:
   --tdr-status=ID            Inspect state of an existing TDR session
   --list-tdr                 List all saved TDR sessions
   --clean-tdr[=all]          Clean/prune stored TDR sessions (--clean-tdr=all for full cleanup)
+  --instrument[=TARGET]      Inject selective runtime probes at flagged locations
+  --probe-output=FILE        Specify output trace file for runtime probes
   --list-rules       Print the complete rule catalog (add --json for metadata)
   --help, -h         Show this help message
 
@@ -250,6 +253,8 @@ Examples:
       "--test-format",
       "--session-id",
       "--tdr-status",
+      "--instrument",
+      "--probe-output",
     ]);
 
     const posTargets: string[] = [];
@@ -377,6 +382,101 @@ Examples:
     }
 
     console.log(`Generated ${results.length} test file(s)`);
+    process.exit(0);
+  }
+
+  // =========================================================================
+  // Phase 2D: Selective Instrumentation
+  // =========================================================================
+  const isInstrument =
+    args.includes("--instrument") ||
+    args.some((a) => a.startsWith("--instrument="));
+
+  if (isInstrument) {
+    const instrumentFlag = getFlag(args, "--instrument");
+    const target =
+      instrumentFlag && instrumentFlag !== ""
+        ? instrumentFlag
+        : targets[0];
+
+    if (!target) {
+      console.error("Error: No target specified for --instrument.");
+      process.exit(1);
+    }
+
+    const resolvedTarget = path.resolve(target);
+    if (!fs.existsSync(resolvedTarget)) {
+      console.error(`Error: Target not found: ${target}`);
+      process.exit(1);
+    }
+
+    const instrumentOutput = getFlag(args, "--output") || "./instrumented/";
+    const probeOutput = getFlag(args, "--probe-output");
+    const resolvedOutput = path.resolve(instrumentOutput);
+
+    const isTargetFile = fs.statSync(resolvedTarget).isFile();
+    const targetProjectRoot = isTargetFile
+      ? path.dirname(resolvedTarget)
+      : resolvedTarget;
+
+    const verifier = new CodeVerifier({
+      projectRoot: targetProjectRoot,
+      enableAbstractInterpretation: !disableAI,
+      disabledRules: [...config.disable, ...cliDisable],
+      severityOverrides: config.severities,
+      baselineFingerprints,
+      failOn,
+    });
+
+    const files = isTargetFile
+      ? [resolvedTarget]
+      : expandTargets([resolvedTarget], config.exclude);
+
+    const instrumentedFiles: Array<{
+      original: string;
+      instrumented: string;
+    }> = [];
+
+    for (const file of files) {
+      const code = fs.readFileSync(file, "utf-8");
+      const result = await verifier.verifyCode(code, file);
+
+      let outputPath: string;
+      if (isTargetFile) {
+        if (
+          instrumentOutput.endsWith("/") ||
+          instrumentOutput.endsWith("\\") ||
+          (fs.existsSync(resolvedOutput) &&
+            fs.statSync(resolvedOutput).isDirectory())
+        ) {
+          outputPath = path.join(resolvedOutput, path.basename(file));
+        } else {
+          outputPath = resolvedOutput;
+        }
+      } else {
+        const relativePath = path.relative(resolvedTarget, file);
+        outputPath = path.join(resolvedOutput, relativePath);
+      }
+
+      fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+
+      if (result.diagnostics.length === 0) {
+        // No findings — copy original file unchanged
+        fs.copyFileSync(file, outputPath);
+        instrumentedFiles.push({ original: file, instrumented: outputPath });
+      } else {
+        // Findings present — inject selective probes
+        const instrumented = instrumentCode(code, file, result.diagnostics, {
+          probeOutput,
+        });
+        fs.writeFileSync(outputPath, instrumented, "utf-8");
+        instrumentedFiles.push({ original: file, instrumented: outputPath });
+      }
+    }
+
+    console.log(
+      `Instrumented ${instrumentedFiles.length} file(s) in ${instrumentOutput}`,
+    );
     process.exit(0);
   }
 

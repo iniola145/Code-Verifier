@@ -3,32 +3,10 @@ import * as path from "path";
 import { execSync } from "child_process";
 import { CodeVerifier } from "../engine";
 import { Diagnostic } from "../types/verifier";
-import { detectFramework } from "../test-gen/generator";
+import { detectFramework } from "../test-gen/detect-framework";
+import { FixVerificationResult, VerifyFixOptions } from "./types";
 
-/**
- * Result of verifying a fix.
- */
-export interface FixVerificationResult {
-  fixed: boolean;
-  remainingFindings: Diagnostic[];
-  resolvedFindings: Diagnostic[];
-  newFindings: Diagnostic[];
-  testResult?: {
-    passed: boolean;
-    output: string;
-  };
-}
-
-export interface VerifyFixOptions {
-  runTests?: boolean;
-  testCommand?: string;
-  testFile?: string;
-  cwd?: string;
-  codeOverride?: string;
-  timeoutMs?: number;
-  verifier?: CodeVerifier;
-  projectRoot?: string;
-}
+export { FixVerificationResult, VerifyFixOptions };
 
 /**
  * Checks whether an original diagnostic is still present in the new diagnostics.

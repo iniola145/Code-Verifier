@@ -25,6 +25,7 @@ import {
 import { loadConfig } from "../src/config";
 import * as fs from "fs";
 import * as os from "os";
+import { execSync } from "child_process";
 import { SemanticAnalysisIndex } from "../src/semantic-analysis";
 import { ImportGraphIndex } from "../src/unused-files";
 import { ProjectUiIndex } from "../src/project-ui-index";
@@ -58,6 +59,12 @@ import {
   findExistingTestFile,
   verifyFix,
   Diagnostic,
+  generateProbe,
+  RUNTIME_PREAMBLE_CODE,
+  generateRuntimePreamble,
+  instrumentCode,
+  instrumentFile,
+  codeVerifierInstrumentPlugin,
 } from "../src";
 import CodeVerifierReporter from "../src/adapters/jest-reporter";
 import codeVerifierPlugin from "../src/adapters/vitest-plugin";
@@ -4406,6 +4413,382 @@ async function runTests() {
     setSessionDir(null);
     try {
       fs.rmSync(testSessionDir, { recursive: true, force: true });
+    } catch {}
+
+    // =========================================================================
+    // Phase 2D: Selective Instrumentation
+    // =========================================================================
+    console.log("— Phase 2D: Selective Instrumentation");
+
+    // 1. Probe code templates for each finding type
+    const nullFinding: Diagnostic = {
+      id: "diag-probe-1",
+      ruleId: "AI-NULL-001",
+      message: "Variable user.address may be null",
+      severity: "HIGH",
+      category: "CORRECTNESS",
+      confidence: "HIGH",
+      loc: { start: { line: 42, column: 8 }, end: { line: 42, column: 20 } },
+      filePath: "/test/User.ts",
+      explanation: "Null dereference",
+      codeSnippet: "user.address.city",
+      remediation: { summary: "Null dereference check", llmPromptHint: "Check user.address" },
+    };
+
+    const nullProbe = generateProbe(nullFinding, { line: 42, column: 8 });
+    assert(
+      nullProbe.includes("__cv_probe_null") &&
+        nullProbe.includes("Variable user.address may be null") &&
+        nullProbe.includes('"L42"'),
+      "generateProbe produces __cv_probe_null for AI-NULL-001 finding",
+    );
+
+    const taintFinding: Diagnostic = {
+      ...nullFinding,
+      id: "diag-probe-2",
+      ruleId: "AI-TAINT-001",
+      message: "Untrusted input flows to dangerouslySetInnerHTML",
+    };
+    const taintProbe = generateProbe(taintFinding, { line: 15, column: 2 });
+    assert(
+      taintProbe.includes("__cv_probe_taint") &&
+        taintProbe.includes("Untrusted input") &&
+        taintProbe.includes('"L15"'),
+      "generateProbe produces __cv_probe_taint for AI-TAINT-001 finding",
+    );
+
+    const compFinding: Diagnostic = {
+      ...nullFinding,
+      id: "diag-probe-3",
+      ruleId: "COMP-001",
+      message: "Missing required prop id in UserProfile",
+    };
+    const compProbe = generateProbe(compFinding, { line: 20, column: 0 });
+    assert(
+      compProbe.includes("__cv_probe_props") &&
+        compProbe.includes("Missing required prop") &&
+        compProbe.includes('"L20"'),
+      "generateProbe produces __cv_probe_props for COMP-001 finding",
+    );
+
+    const raceFinding: Diagnostic = {
+      ...nullFinding,
+      id: "diag-probe-4",
+      ruleId: "RACE-001",
+      message: "Unsynchronized concurrent state update",
+    };
+    const raceProbe = generateProbe(raceFinding, { line: 55, column: 4 });
+    assert(
+      raceProbe.includes("__cv_probe_async") &&
+        raceProbe.includes("Unsynchronized concurrent") &&
+        raceProbe.includes('"L55"'),
+      "generateProbe produces __cv_probe_async for RACE-001 finding",
+    );
+
+    const asyncFinding: Diagnostic = {
+      ...nullFinding,
+      id: "diag-probe-5",
+      ruleId: "ASYNC-001",
+      message: "Unhandled promise rejection risk",
+    };
+    const asyncProbe = generateProbe(asyncFinding, { line: 60, column: 10 });
+    assert(
+      asyncProbe.includes("__cv_probe_promise") &&
+        asyncProbe.includes("Unhandled promise") &&
+        asyncProbe.includes('"L60"'),
+      "generateProbe produces __cv_probe_promise for ASYNC-001 finding",
+    );
+
+    const serviceFinding: Diagnostic = {
+      ...nullFinding,
+      id: "diag-probe-6",
+      ruleId: "SERVICE-001",
+      message: "Unchecked HTTP fetch status response",
+    };
+    const serviceProbe = generateProbe(serviceFinding, { line: 88, column: 0 });
+    assert(
+      serviceProbe.includes("__cv_probe_fetch") &&
+        serviceProbe.includes("Unchecked HTTP fetch") &&
+        serviceProbe.includes('"L88"'),
+      "generateProbe produces __cv_probe_fetch for SERVICE-001 finding",
+    );
+
+    const genericFinding: Diagnostic = {
+      ...nullFinding,
+      id: "diag-probe-7",
+      ruleId: "SEC-XSS-001",
+      message: "Generic security warning",
+    };
+    const genericProbe = generateProbe(genericFinding, { line: 99, column: 0 });
+    assert(
+      genericProbe.includes("__cv_probe(") &&
+        genericProbe.includes("SEC-XSS-001") &&
+        genericProbe.includes('"L99"'),
+      "generateProbe falls back to __cv_probe for unspecified rule types",
+    );
+
+    // 2. Runtime preamble execution and event recording
+    const probeSandbox: any = { console, require, setTimeout, clearTimeout };
+    const runtimeFn = new Function("window", "globalThis", `${RUNTIME_PREAMBLE_CODE}; return window;`);
+    const win = runtimeFn(probeSandbox, probeSandbox);
+
+    assert(
+      Array.isArray(win.__cv_probes),
+      "Runtime preamble initializes window.__cv_probes array",
+    );
+
+    // Null probe tests
+    win.__cv_probes.length = 0;
+    win.__cv_probe_null("user.name is undefined", "L10");
+    assert(
+      win.__cv_probes.length === 1 &&
+        win.__cv_probes[0].type === "null_dereference" &&
+        win.__cv_probes[0].location === "L10",
+      "__cv_probe_null records null_dereference when value is omitted/undefined",
+    );
+
+    win.__cv_probe_null("user.name is null", "L11", null);
+    assert(
+      win.__cv_probes.length === 2 &&
+        win.__cv_probes[1].type === "null_dereference",
+      "__cv_probe_null records null_dereference when value is explicitly null",
+    );
+
+    win.__cv_probe_null("user.name is valid", "L12", "Alice");
+    assert(
+      win.__cv_probes.length === 2,
+      "__cv_probe_null does NOT record when value is non-null",
+    );
+
+    // Taint probe test
+    win.__cv_probe_taint("tainted payload", "L20", "<script>alert(1)</script>");
+    assert(
+      win.__cv_probes.length === 3 &&
+        win.__cv_probes[2].type === "taint_flow" &&
+        win.__cv_probes[2].value === "<script>alert(1)</script>",
+      "__cv_probe_taint records taint_flow event with captured value",
+    );
+
+    // Props probe test
+    win.__cv_probe_props("UserProfile", "L30", { userId: 42 });
+    assert(
+      win.__cv_probes.length === 4 &&
+        win.__cv_probes[3].type === "component_props" &&
+        win.__cv_probes[3].value.userId === 42,
+      "__cv_probe_props records component_props event with component props",
+    );
+
+    // Async probe test
+    let asyncFailed = false;
+    try {
+      await win.__cv_probe_async("sync fail", "L40", () =>
+        Promise.reject(new Error("network timeout")),
+      );
+    } catch {
+      asyncFailed = true;
+    }
+    assert(
+      asyncFailed &&
+        win.__cv_probes.some((e: any) => e.type === "async_failure" && e.location === "L40"),
+      "__cv_probe_async catches and records async_failure event on rejected promise",
+    );
+
+    // Promise probe test
+    await win.__cv_probe_promise("fetch task", "L50", Promise.resolve({ ok: true }));
+    assert(
+      win.__cv_probes.some((e: any) => e.type === "promise_resolved" && e.location === "L50"),
+      "__cv_probe_promise records promise_resolved event on fulfilled promise",
+    );
+
+    // Preamble generator with probe-output configuration
+    const customPreamble = generateRuntimePreamble("/tmp/custom-traces.jsonl");
+    assert(
+      customPreamble.includes("/tmp/custom-traces.jsonl") &&
+        customPreamble.includes("__cv_probe_output"),
+      "generateRuntimePreamble injects __cv_probe_output configuration into preamble",
+    );
+
+    // 3. Selective AST Instrumentation
+    const sampleCleanCode = `function add(a: number, b: number) {\n  return a + b;\n}`;
+    const cleanOutput = instrumentCode(sampleCleanCode, "add.ts", []);
+    assert(
+      cleanOutput === sampleCleanCode,
+      "instrumentCode returns unmodified code when there are no findings",
+    );
+
+    const sampleVulnCode = `
+function display(user: any) {
+  const name = user.profile.name;
+  return name;
+}
+`;
+    const singleFinding: Diagnostic = {
+      ...nullFinding,
+      loc: { start: { line: 3, column: 15 }, end: { line: 3, column: 32 } },
+    };
+
+    const instrumented = instrumentCode(sampleVulnCode, "display.ts", [singleFinding]);
+    assert(
+      instrumented.includes("[code-verifier] Runtime Probes Preamble") &&
+        instrumented.includes("__cv_probe_null(") &&
+        instrumented.includes('"L3"'),
+      "instrumentCode injects runtime preamble and __cv_probe_null at flagged location",
+    );
+
+    const withoutPreamble = instrumentCode(sampleVulnCode, "display.ts", [singleFinding], {
+      prependRuntime: false,
+    });
+    assert(
+      !withoutPreamble.includes("[code-verifier] Runtime Probes Preamble") &&
+        withoutPreamble.includes("__cv_probe_null("),
+      "instrumentCode honors prependRuntime: false option",
+    );
+
+    // Plugin invocation compatibility (direct and Babel options)
+    const directPlugin = codeVerifierInstrumentPlugin({ findings: [singleFinding] });
+    assert(
+      directPlugin.name === "code-verifier-instrument" && typeof directPlugin.visitor === "object",
+      "codeVerifierInstrumentPlugin returns valid plugin object when passed options directly",
+    );
+
+    const babelPlugin = codeVerifierInstrumentPlugin({}, { findings: [singleFinding] });
+    assert(
+      babelPlugin.name === "code-verifier-instrument" && typeof babelPlugin.visitor === "object",
+      "codeVerifierInstrumentPlugin returns valid plugin object when invoked via Babel plugin signature",
+    );
+
+    // Syntactic validity: execution of instrumented code
+    const executableSource = `
+function getCity(user) {
+  var address = user.address;
+  return address;
+}
+getCity({});
+`;
+    const execFinding: Diagnostic = {
+      ...nullFinding,
+      loc: { start: { line: 3, column: 2 }, end: { line: 3, column: 25 } },
+    };
+    const executableInstrumented = instrumentCode(executableSource, "getCity.js", [execFinding]);
+    let executedWithoutError = false;
+    try {
+      const runner = new Function(executableInstrumented);
+      runner();
+      executedWithoutError = true;
+    } catch (e) {
+      executedWithoutError = false;
+    }
+    assert(
+      executedWithoutError,
+      "Instrumented code is syntactically valid and executes without errors in JavaScript runtime",
+    );
+
+    // 4. Runtime engine handling of probe events
+    const probeEvents = [
+      {
+        type: "null_dereference",
+        message: "Cannot read property 'name' of undefined",
+        location: "L42",
+        filePath: "/app/src/UserProfile.tsx",
+        timestamp: Date.now(),
+      },
+      {
+        type: "taint_flow",
+        message: "Untrusted input reaches DOM sink",
+        location: "L15",
+        filePath: "/app/src/UserProfile.tsx",
+        timestamp: Date.now(),
+      },
+      {
+        type: "async_failure",
+        message: "Promise rejected in loadProfile",
+        location: "L88",
+        filePath: "/app/src/UserProfile.tsx",
+        timestamp: Date.now(),
+      },
+    ];
+
+    const probeReport = analyzeRuntimeTraces(probeEvents as any, [nullFinding]);
+    const nullReportFinding = probeReport.find((f: any) => f.ruleId === "RT-NULL-001");
+    assert(
+      nullReportFinding !== undefined &&
+        nullReportFinding.severity === "HIGH" &&
+        nullReportFinding.confirmedBy === "probe at L42" &&
+        nullReportFinding.loc.start.line === 42,
+      "analyzeRuntimeTraces correlates null_dereference probe event to RT-NULL-001 with correct line",
+    );
+
+    const taintReportFinding = probeReport.find((f: any) => f.ruleId === "RT-TAINT-001");
+    assert(
+      taintReportFinding !== undefined &&
+        taintReportFinding.severity === "HIGH" &&
+        taintReportFinding.confirmedBy === "probe at L15" &&
+        taintReportFinding.loc.start.line === 15,
+      "analyzeRuntimeTraces correlates taint_flow probe event to RT-TAINT-001 with correct line",
+    );
+
+    const asyncReportFinding = probeReport.find((f: any) => f.ruleId === "RT-ASYNC-001");
+    assert(
+      asyncReportFinding !== undefined &&
+        asyncReportFinding.severity === "HIGH" &&
+        asyncReportFinding.confirmedBy === "probe at L88" &&
+        asyncReportFinding.loc.start.line === 88,
+      "analyzeRuntimeTraces correlates async_failure probe event to RT-ASYNC-001 with correct line",
+    );
+
+    // 5. CLI end-to-end integration test
+    const tempCliDir = path.join(os.tmpdir(), `cv-cli-inst-${Date.now()}`);
+    const tempSrcDir = path.join(tempCliDir, "src");
+    const tempOutDir = path.join(tempCliDir, "out");
+    fs.mkdirSync(tempSrcDir, { recursive: true });
+
+    // Vulnerable file that triggers static findings
+    const vulnFilePath = path.join(tempSrcDir, "Vulnerable.tsx");
+    fs.writeFileSync(
+      vulnFilePath,
+      `import React from 'react';\nexport function Vulnerable() {\n  const user: any = null;\n  return <div>{user.name}</div>;\n}`,
+      "utf-8",
+    );
+
+    // Clean file with no findings
+    const cleanFilePath = path.join(tempSrcDir, "Clean.tsx");
+    const cleanContent = `import React from 'react';\nexport function Clean() {\n  return <div>Clean Component</div>;\n}`;
+    fs.writeFileSync(cleanFilePath, cleanContent, "utf-8");
+
+    // Execute CLI with --instrument
+    const cliScript = path.resolve(__dirname, "../src/cli.ts");
+    const cliOutput = execSync(
+      `npx ts-node "${cliScript}" --instrument "${tempSrcDir}" --output "${tempOutDir}"`,
+      { encoding: "utf-8" },
+    );
+
+    assert(
+      cliOutput.includes("Instrumented 2 file(s)"),
+      "CLI --instrument logs total number of processed files",
+    );
+
+    const outVulnPath = path.join(tempOutDir, "Vulnerable.tsx");
+    const outCleanPath = path.join(tempOutDir, "Clean.tsx");
+    assert(
+      fs.existsSync(outVulnPath) && fs.existsSync(outCleanPath),
+      "CLI --instrument produces all target files in output directory",
+    );
+
+    const outVulnCode = fs.readFileSync(outVulnPath, "utf-8");
+    assert(
+      outVulnCode.includes("[code-verifier] Runtime Probes Preamble") &&
+        outVulnCode.includes("__cv_probe_null"),
+      "CLI --instrument injects probes into files with findings",
+    );
+
+    const outCleanCode = fs.readFileSync(outCleanPath, "utf-8");
+    assert(
+      outCleanCode === cleanContent,
+      "CLI --instrument leaves files without findings completely unchanged",
+    );
+
+    try {
+      fs.rmSync(tempCliDir, { recursive: true, force: true });
     } catch {}
   }
 

@@ -1,7 +1,6 @@
 import { VerificationResult, Diagnostic } from "../types/verifier";
 import { RuntimeFinding } from "../runtime/types";
-import { TDRSession } from "../tdr/session-manager";
-import { FixVerificationResult } from "../tdr/fix-verifier";
+import { TDRSession, FixVerificationResult } from "../tdr/types";
 
 export class LLMFormatter {
   /**

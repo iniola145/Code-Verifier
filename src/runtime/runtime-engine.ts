@@ -96,6 +96,63 @@ export function analyzeRuntimeTraces(
     const filePath =
       matchingStatic?.filePath || event.filePath || "unknown";
 
+    if (event.location && (!event.line || event.line === 1)) {
+      const parsedLine = parseInt(String(event.location).replace(/\D/g, ""), 10);
+      if (!isNaN(parsedLine) && parsedLine > 0) {
+        loc.start.line = parsedLine;
+        loc.end.line = parsedLine;
+      }
+    }
+
+    // Phase 2D: Instrumentation probe events
+    if (event.type === "null_dereference") {
+      findings.push({
+        id: `RT-NULL-${idx + 1}`,
+        ruleId: "RT-NULL-001",
+        severity: "HIGH",
+        message: `Null dereference confirmed: ${event.message}`,
+        filePath,
+        loc,
+        trace: [event],
+        confidence: "HIGH",
+        confirmedBy: event.location ? `probe at ${event.location}` : "probe",
+        staticFinding: matchingStatic,
+      });
+      continue;
+    }
+
+    if (event.type === "taint_flow") {
+      findings.push({
+        id: `RT-TAINT-${idx + 1}`,
+        ruleId: "RT-TAINT-001",
+        severity: "HIGH",
+        message: `Taint flow confirmed: ${event.message}`,
+        filePath,
+        loc,
+        trace: [event],
+        confidence: "HIGH",
+        confirmedBy: event.location ? `probe at ${event.location}` : "probe",
+        staticFinding: matchingStatic,
+      });
+      continue;
+    }
+
+    if (event.type === "async_failure") {
+      findings.push({
+        id: `RT-ASYNC-${idx + 1}`,
+        ruleId: "RT-ASYNC-001",
+        severity: "HIGH",
+        message: `Async operation failed: ${event.message}`,
+        filePath,
+        loc,
+        trace: [event],
+        confidence: "HIGH",
+        confirmedBy: event.location ? `probe at ${event.location}` : "probe",
+        staticFinding: matchingStatic,
+      });
+      continue;
+    }
+
     // Detect specialized failure signatures
     const isNullDereference =
       /cannot read propert|null dereference|is null|is undefined|undefined is not an object|AI-NULL-001/i.test(
