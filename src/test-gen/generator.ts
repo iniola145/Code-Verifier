@@ -1,11 +1,16 @@
 import * as fs from "fs";
 import * as path from "path";
+import traverse from "@babel/traverse";
 import { ProjectSummaryIndex } from "../abstract-interpreter/project-summaries";
 import { CodeVerifier } from "../engine";
 import { parseSourceCode } from "../parser/ast";
 import { ProjectUiIndex } from "../project-ui-index";
 import { synthesizeMocks } from "./mock-synthesizer";
-import { getAllStrategies, getStrategiesForRule } from "./strategies";
+import {
+  getAllStrategies,
+  getStrategiesForRule,
+  generateServiceModuleTests,
+} from "./strategies";
 import { generateTestFile } from "./templates";
 import {
   GeneratedTest,
@@ -111,23 +116,59 @@ export async function generateTestsForFile(
     }
   }
 
-  // If no specific finding triggered a strategy or file is clean, generate a baseline test
+  // If no specific finding triggered a strategy or file is clean, check for service modules
+  if (testCases.length === 0) {
+    const serviceTests = generateServiceModuleTests(context);
+    if (serviceTests.length > 0) {
+      testCases.push(...serviceTests);
+    }
+  }
+
+  // If still no test cases, generate a baseline test
   if (testCases.length === 0) {
     const baseName = path.basename(resolvedPath).replace(/\.(tsx?|jsx?)$/, "");
-    testCases.push({
-      id: `baseline-${baseName}`,
-      description: `should render or load without crashing`,
-      framework,
-      body: `  it('loads module and renders without crashing', () => {\n    expect(true).toBe(true);\n  });`,
-      imports: [
-        `import React from 'react';`,
-        `import { render } from '@testing-library/react-native';`,
-      ],
-      mocks,
-      sourceFile: resolvedPath,
-      coversRules: [],
-      confidence: 1.0,
+
+    // Check if AST contains JSX elements/fragments or component contracts
+    let hasJsx = false;
+    traverse(ast, {
+      JSXElement() {
+        hasJsx = true;
+      },
+      JSXFragment() {
+        hasJsx = true;
+      },
     });
+
+    const isComponent = hasJsx || contracts.length > 0;
+
+    if (isComponent) {
+      testCases.push({
+        id: `baseline-${baseName}`,
+        description: `should render or load without crashing`,
+        framework,
+        body: `  it('loads module and renders without crashing', () => {\n    expect(true).toBe(true);\n  });`,
+        imports: [
+          `import React from 'react';`,
+          `import { render } from '@testing-library/react-native';`,
+        ],
+        mocks,
+        sourceFile: resolvedPath,
+        coversRules: [],
+        confidence: 1.0,
+      });
+    } else {
+      testCases.push({
+        id: `baseline-${baseName}`,
+        description: `should load module and export defined members`,
+        framework,
+        body: `  it('loads module and exports defined members', () => {\n    expect(${baseName}Module).toBeDefined();\n  });`,
+        imports: [`import * as ${baseName}Module from './${baseName}';`],
+        mocks,
+        sourceFile: resolvedPath,
+        coversRules: [],
+        confidence: 1.0,
+      });
+    }
   } else {
     // Attach synthesized mocks to test cases so template renders them
     if (mocks.length > 0 && testCases[0]) {

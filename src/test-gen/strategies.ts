@@ -547,6 +547,7 @@ function sourceImportStatement(
   const relPath = `./${baseName}`;
 
   const validNamed = importedNames.filter((n) => {
+    if (fileExports && fileExports.namedExports.has(n)) return true;
     if (n === baseName) return false;
     if (fileExports && fileExports.defaultExportName === n) return false;
     if (fileExports && !fileExports.namedExports.has(n)) return false;
@@ -554,7 +555,9 @@ function sourceImportStatement(
   });
 
   const isDefault =
-    hasDefault || Boolean(fileExports?.defaultExportName);
+    hasDefault ||
+    (Boolean(fileExports?.defaultExportName) &&
+      !importedNames.some((n) => fileExports?.namedExports.has(n)));
 
   if (isDefault && validNamed.length > 0) {
     return `import ${baseName}, { ${validNamed.join(", ")} } from '${relPath}';`;
@@ -950,12 +953,280 @@ export const AsyncPatternStrategy: TestStrategy = {
   },
 };
 
+/**
+ * Extract literal options passed to axios.create or similar factory from the AST.
+ */
+function extractAxiosCreateOptions(ast: any): {
+  withCredentials?: boolean;
+  headers?: Record<string, string>;
+} {
+  const result: { withCredentials?: boolean; headers?: Record<string, string> } =
+    {};
+  traverse(ast, {
+    CallExpression(p: any) {
+      const callee = p.node.callee;
+      if (
+        (t.isMemberExpression(callee) &&
+          t.isIdentifier(callee.property, { name: "create" })) ||
+        t.isIdentifier(callee, { name: "create" })
+      ) {
+        const arg = p.node.arguments[0];
+        if (t.isObjectExpression(arg)) {
+          for (const prop of arg.properties) {
+            if (t.isObjectProperty(prop) && t.isIdentifier(prop.key)) {
+              if (
+                prop.key.name === "withCredentials" &&
+                t.isBooleanLiteral(prop.value)
+              ) {
+                result.withCredentials = prop.value.value;
+              }
+              if (
+                prop.key.name === "headers" &&
+                t.isObjectExpression(prop.value)
+              ) {
+                result.headers = {};
+                for (const hProp of prop.value.properties) {
+                  if (t.isObjectProperty(hProp)) {
+                    const k = t.isIdentifier(hProp.key)
+                      ? hProp.key.name
+                      : t.isStringLiteral(hProp.key)
+                        ? hProp.key.value
+                        : null;
+                    const v = t.isStringLiteral(hProp.value)
+                      ? hProp.value.value
+                      : null;
+                    if (k && v) {
+                      result.headers[k] = v;
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+  });
+  return result;
+}
+
+/**
+ * Extract string literals checked by .includes() in the AST.
+ */
+function extractIncludesStrings(ast: any): string[] {
+  const strings: string[] = [];
+  traverse(ast, {
+    CallExpression(p: any) {
+      const callee = p.node.callee;
+      if (
+        t.isMemberExpression(callee) &&
+        t.isIdentifier(callee.property, { name: "includes" })
+      ) {
+        const arg = p.node.arguments[0];
+        if (t.isStringLiteral(arg)) {
+          strings.push(arg.value);
+        }
+      }
+    },
+  });
+  return [...new Set(strings)];
+}
+
+// =========================================================================
+// Strategy 6: Service / API Client Strategy (SERVICE-001, SERVICE-002, SERVICE-003)
+// =========================================================================
+export const ServiceClientStrategy: TestStrategy = {
+  handlesRules: ["SERVICE-001", "SERVICE-002", "SERVICE-003"],
+
+  generate(context: StrategyContext, finding: Diagnostic): TestCase[] {
+    const { framework, sourceFile, ast } = context;
+    const testCases: TestCase[] = [];
+    const baseName = path.basename(sourceFile).replace(/\.(tsx?|jsx?)$/, "");
+    const fileExports = getFileExports(ast);
+    const line = finding.loc.start.line;
+    const fnKeyword = framework === "vitest" ? "vi.fn()" : "jest.fn()";
+
+    // Find exported client instance or functions
+    const clientCandidates = ["apiClient", "client", "api", "default"];
+    const foundClient =
+      clientCandidates.find(
+        (name) =>
+          fileExports.namedExports.has(name) ||
+          (name === "default" && fileExports.defaultExportName),
+      ) || baseName;
+
+    const hasSetOnUnauth = fileExports.namedExports.has("setOnUnauthenticated");
+
+    const isDefault = foundClient === "default";
+    const targetName = isDefault
+      ? fileExports.defaultExportName || "apiClient"
+      : foundClient;
+    const namedToImport = hasSetOnUnauth
+      ? [targetName, "setOnUnauthenticated"]
+      : [targetName];
+
+    const sourceImport = sourceImportStatement(
+      sourceFile,
+      namedToImport,
+      isDefault,
+      fileExports,
+    );
+
+    // 1. Inspect AST for actual production options and string constants
+    const createOptions = extractAxiosCreateOptions(ast);
+    const authEndpoints = extractIncludesStrings(ast);
+
+    if (finding.ruleId === "SERVICE-003") {
+      // Configuration & Call-site Assertion
+      const configAssertions: string[] = [
+        `    expect(${targetName}).toBeDefined();`,
+        `    expect(${targetName}.defaults).toBeDefined();`,
+      ];
+      if (createOptions.withCredentials !== undefined) {
+        configAssertions.push(
+          `    expect(${targetName}.defaults.withCredentials).toBe(${createOptions.withCredentials});`,
+        );
+      }
+      if (createOptions.headers && Object.keys(createOptions.headers).length > 0) {
+        configAssertions.push(
+          `    expect(${targetName}.defaults.headers).toEqual(expect.objectContaining(${JSON.stringify(createOptions.headers)}));`,
+        );
+      }
+
+      testCases.push({
+        id: `service-config-${targetName}`,
+        description: `should verify client initialization and production configuration for ${targetName}`,
+        framework,
+        body: `  it('should verify client initialization and production configuration for ${targetName}', () => {\n${configAssertions.join("\n")}\n  });`,
+        imports: [sourceImport],
+        mocks: [],
+        sourceFile,
+        coversRules: [finding.ruleId],
+        confidence: 0.95,
+      });
+
+      // TDR Defect Contract Test
+      testCases.push({
+        id: `service-timeout-defect-${targetName}`,
+        description: `should enforce a bounded request timeout on ${targetName} (${finding.ruleId})`,
+        framework,
+        body: `  it('should enforce a bounded request timeout on ${targetName} (${finding.ruleId})', () => {\n    // Covers ${finding.ruleId} at line ${line}\n    // Central client must specify a positive timeout to prevent unbounded hanging\n    const timeout = ${targetName}.defaults?.timeout;\n    expect(typeof timeout === 'number' && timeout > 0).toBe(true);\n  });`,
+        imports: [sourceImport],
+        mocks: [],
+        sourceFile,
+        coversRules: [finding.ruleId],
+        confidence: 0.9,
+      });
+
+      if (hasSetOnUnauth) {
+        // Interceptor 401 Protected Route
+        testCases.push({
+          id: `service-interceptor-401-${targetName}`,
+          description: `should trigger onUnauthenticated on 401 response for protected endpoints`,
+          framework,
+          body: `  it('should trigger onUnauthenticated callback on 401 for protected endpoints', async () => {\n    const unauthHandler = ${fnKeyword};\n    setOnUnauthenticated(unauthHandler);\n\n    const handlers = ${targetName}.interceptors?.response?.handlers || [];\n    const errorHandler = handlers[0]?.rejected;\n    expect(typeof errorHandler).toBe('function');\n\n    const error = {\n      config: { url: '/api/v1/protected-resource' },\n      response: { status: 401 },\n    };\n    await expect(errorHandler(error)).rejects.toEqual(error);\n    expect(unauthHandler).toHaveBeenCalledTimes(1);\n  });`,
+          imports: [sourceImport],
+          mocks: [],
+          sourceFile,
+          coversRules: [finding.ruleId],
+          confidence: 0.95,
+        });
+
+        // Interceptor 401 Auth Routes Bypass
+        const endpointsToTest =
+          authEndpoints.length > 0
+            ? authEndpoints
+            : ["/auth/login", "/auth/me", "/auth/logout"];
+
+        testCases.push({
+          id: `service-interceptor-auth-401-${targetName}`,
+          description: `should bypass onUnauthenticated callback on 401 for auth endpoints`,
+          framework,
+          body: `  it.each(${JSON.stringify(endpointsToTest)})('should bypass onUnauthenticated callback on 401 for auth endpoint %s', async (url) => {\n    const unauthHandler = ${fnKeyword};\n    setOnUnauthenticated(unauthHandler);\n\n    const handlers = ${targetName}.interceptors?.response?.handlers || [];\n    const errorHandler = handlers[0]?.rejected;\n    expect(typeof errorHandler).toBe('function');\n\n    const error = {\n      config: { url },\n      response: { status: 401 },\n    };\n    await expect(errorHandler(error)).rejects.toEqual(error);\n    expect(unauthHandler).not.toHaveBeenCalled();\n  });`,
+          imports: [sourceImport],
+          mocks: [],
+          sourceFile,
+          coversRules: [finding.ruleId],
+          confidence: 0.95,
+        });
+
+        // Non-401 Negative Tests
+        testCases.push({
+          id: `service-interceptor-non401-${targetName}`,
+          description: `should NOT trigger onUnauthenticated callback on non-401 HTTP errors`,
+          framework,
+          body: `  it.each([400, 403, 404, 500, 502])('should NOT trigger onUnauthenticated on HTTP %i error', async (status) => {\n    const unauthHandler = ${fnKeyword};\n    setOnUnauthenticated(unauthHandler);\n\n    const handlers = ${targetName}.interceptors?.response?.handlers || [];\n    const errorHandler = handlers[0]?.rejected;\n    expect(typeof errorHandler).toBe('function');\n\n    const error = {\n      config: { url: '/api/v1/protected-resource' },\n      response: { status },\n    };\n    await expect(errorHandler(error)).rejects.toEqual(error);\n    expect(unauthHandler).not.toHaveBeenCalled();\n  });`,
+          imports: [sourceImport],
+          mocks: [],
+          sourceFile,
+          coversRules: [finding.ruleId],
+          confidence: 0.9,
+        });
+
+        // Network Drop / Undefined Response
+        testCases.push({
+          id: `service-interceptor-network-drop-${targetName}`,
+          description: `should handle network drops gracefully when error.response is undefined`,
+          framework,
+          body: `  it('should handle network drops gracefully when error.response is undefined', async () => {\n    const unauthHandler = ${fnKeyword};\n    setOnUnauthenticated(unauthHandler);\n\n    const handlers = ${targetName}.interceptors?.response?.handlers || [];\n    const errorHandler = handlers[0]?.rejected;\n    expect(typeof errorHandler).toBe('function');\n\n    const networkError = {\n      config: { url: '/api/v1/protected-resource' },\n      message: 'Network Error',\n    };\n    await expect(errorHandler(networkError)).rejects.toEqual(networkError);\n    expect(unauthHandler).not.toHaveBeenCalled();\n  });`,
+          imports: [sourceImport],
+          mocks: [],
+          sourceFile,
+          coversRules: [finding.ruleId],
+          confidence: 0.9,
+        });
+
+        // Unset Callback Safety
+        testCases.push({
+          id: `service-interceptor-unset-callback-${targetName}`,
+          description: `should not throw when onUnauthenticated callback is null`,
+          framework,
+          body: `  it('should not throw when onUnauthenticated callback is not configured (null)', async () => {\n    setOnUnauthenticated(null);\n\n    const handlers = ${targetName}.interceptors?.response?.handlers || [];\n    const errorHandler = handlers[0]?.rejected;\n    expect(typeof errorHandler).toBe('function');\n\n    const error = {\n      config: { url: '/api/v1/protected-resource' },\n      response: { status: 401 },\n    };\n    await expect(errorHandler(error)).rejects.toEqual(error);\n  });`,
+          imports: [sourceImport],
+          mocks: [],
+          sourceFile,
+          coversRules: [finding.ruleId],
+          confidence: 0.9,
+        });
+
+        // Success Handler Pass-Through
+        testCases.push({
+          id: `service-interceptor-success-${targetName}`,
+          description: `should pass successful responses through without modification`,
+          framework,
+          body: `  it('should pass successful responses through without modification', () => {\n    const handlers = ${targetName}.interceptors?.response?.handlers || [];\n    const successHandler = handlers[0]?.fulfilled;\n    expect(typeof successHandler).toBe('function');\n\n    const mockResponse = { status: 200, data: { ok: true } };\n    expect(successHandler(mockResponse)).toBe(mockResponse);\n  });`,
+          imports: [sourceImport],
+          mocks: [],
+          sourceFile,
+          coversRules: [finding.ruleId],
+          confidence: 0.9,
+        });
+      }
+    } else {
+      testCases.push({
+        id: `service-client-${targetName}`,
+        description: `should handle service client operations gracefully (${finding.ruleId})`,
+        framework,
+        body: `  it('should verify ${targetName} service client initialization (${finding.ruleId})', () => {\n    // Covers ${finding.ruleId} at line ${line}\n    expect(${targetName}).toBeDefined();\n  });`,
+        imports: [sourceImport],
+        mocks: [],
+        sourceFile,
+        coversRules: [finding.ruleId],
+        confidence: 0.85,
+      });
+    }
+
+    return testCases;
+  },
+};
+
 const STRATEGIES: TestStrategy[] = [
   NullabilityStrategy,
   TaintFlowStrategy,
   ComponentContractStrategy,
   RaceConditionStrategy,
   AsyncPatternStrategy,
+  ServiceClientStrategy,
 ];
 
 /**
@@ -970,4 +1241,450 @@ export function getAllStrategies(): TestStrategy[] {
  */
 export function getStrategiesForRule(ruleId: string): TestStrategy[] {
   return STRATEGIES.filter((s) => s.handlesRules.includes(ruleId));
+}
+
+interface ExtractedServiceMethod {
+  serviceName?: string;
+  isDefaultExport: boolean;
+  methodName: string;
+  isAsync: boolean;
+  params: string[];
+  apiCalls: Array<{
+    client: string;
+    method: string;
+    endpoint?: string;
+    hasPayload: boolean;
+    payloadArgName?: string;
+  }>;
+  hasCatch: boolean;
+  catchThrows: boolean;
+  catchLogsError: boolean;
+  catchFallbackMessage?: string;
+  returnsDataData: boolean;
+  returnsData: boolean;
+  returnsTrue: boolean;
+  mappedProperties: string[];
+  helperCalls: string[];
+}
+
+/**
+ * Generate comprehensive unit tests for exported service modules and functions.
+ */
+export function generateServiceModuleTests(context: StrategyContext): TestCase[] {
+  const { ast, sourceFile, framework } = context;
+  const fileExports = getFileExports(ast);
+  const spyKeyword = framework === "jest" ? "jest.spyOn" : "vi.spyOn";
+  const clearKeyword =
+    framework === "jest" ? "jest.clearAllMocks()" : "vi.clearAllMocks()";
+
+  const extractedMethods: ExtractedServiceMethod[] = [];
+
+  const analyzeFunction = (
+    fnNode: any,
+    methodName: string,
+    serviceName?: string,
+    isDefaultExport = false,
+  ) => {
+    const params = (fnNode.params || []).map((p: any) => {
+      if (t.isIdentifier(p)) return p.name;
+      if (t.isAssignmentPattern(p) && t.isIdentifier(p.left)) return p.left.name;
+      return "arg";
+    });
+
+    const info: ExtractedServiceMethod = {
+      serviceName,
+      isDefaultExport,
+      methodName,
+      isAsync: Boolean(fnNode.async),
+      params,
+      apiCalls: [],
+      hasCatch: false,
+      catchThrows: false,
+      catchLogsError: false,
+      catchFallbackMessage: undefined,
+      returnsDataData: false,
+      returnsData: false,
+      returnsTrue: false,
+      mappedProperties: [],
+      helperCalls: [],
+    };
+
+    traverse(fnNode, {
+      noScope: true,
+      CallExpression(cPath: any) {
+        const callee = cPath.node.callee;
+        if (
+          t.isMemberExpression(callee) &&
+          t.isIdentifier(callee.object) &&
+          t.isIdentifier(callee.property)
+        ) {
+          const objName = callee.object.name;
+          const propName = callee.property.name;
+          if (["get", "post", "put", "delete", "patch"].includes(propName)) {
+            const firstArg = cPath.node.arguments[0];
+            const endpoint = t.isStringLiteral(firstArg)
+              ? firstArg.value
+              : t.isTemplateLiteral(firstArg) && firstArg.quasis[0]
+                ? firstArg.quasis[0].value.raw
+                : undefined;
+            const hasPayload = cPath.node.arguments.length > 1;
+            const secondArg = cPath.node.arguments[1];
+            const payloadArgName = t.isIdentifier(secondArg)
+              ? secondArg.name
+              : undefined;
+            info.apiCalls.push({
+              client: objName,
+              method: propName,
+              endpoint,
+              hasPayload,
+              payloadArgName,
+            });
+          }
+          if (objName === "console" && propName === "error") {
+            info.catchLogsError = true;
+          }
+        } else if (t.isIdentifier(callee)) {
+          if (
+            ![
+              "Error",
+              "Boolean",
+              "String",
+              "Number",
+              "Promise",
+              "Object",
+              "Array",
+            ].includes(callee.name)
+          ) {
+            info.helperCalls.push(callee.name);
+          }
+        }
+      },
+      CatchClause(catPath: any) {
+        info.hasCatch = true;
+        catPath.traverse({
+          noScope: true,
+          ThrowStatement() {
+            info.catchThrows = true;
+          },
+          StringLiteral(sStr: any) {
+            if (
+              sStr.node.value &&
+              sStr.node.value.length > 5 &&
+              !sStr.node.value.startsWith("/")
+            ) {
+              if (!info.catchFallbackMessage) {
+                info.catchFallbackMessage = sStr.node.value;
+              }
+            }
+          },
+        });
+      },
+      ReturnStatement(rPath: any) {
+        const arg = rPath.node.argument;
+        if (!arg) return;
+        if (t.isBooleanLiteral(arg) && arg.value === true) {
+          info.returnsTrue = true;
+        } else if (t.isMemberExpression(arg)) {
+          if (
+            t.isMemberExpression(arg.object) &&
+            t.isIdentifier(arg.object.property) &&
+            arg.object.property.name === "data" &&
+            t.isIdentifier(arg.property) &&
+            arg.property.name === "data"
+          ) {
+            info.returnsDataData = true;
+          } else if (
+            t.isIdentifier(arg.property) &&
+            arg.property.name === "data"
+          ) {
+            info.returnsData = true;
+          }
+        } else if (t.isObjectExpression(arg)) {
+          info.mappedProperties = arg.properties
+            .map((prop: any) =>
+              t.isIdentifier(prop.key) ? prop.key.name : undefined,
+            )
+            .filter(Boolean) as string[];
+        }
+      },
+    });
+
+    extractedMethods.push(info);
+  };
+
+  traverse(ast, {
+    ExportNamedDeclaration(p: any) {
+      const decl = p.node.declaration;
+      if (t.isVariableDeclaration(decl)) {
+        for (const item of decl.declarations) {
+          if (
+            t.isIdentifier(item.id) &&
+            item.init &&
+            t.isObjectExpression(item.init)
+          ) {
+            const serviceName = item.id.name;
+            for (const prop of item.init.properties) {
+              if (
+                t.isObjectProperty(prop) &&
+                t.isIdentifier(prop.key) &&
+                (t.isArrowFunctionExpression(prop.value) ||
+                  t.isFunctionExpression(prop.value))
+              ) {
+                analyzeFunction(prop.value, prop.key.name, serviceName, false);
+              } else if (t.isObjectMethod(prop) && t.isIdentifier(prop.key)) {
+                analyzeFunction(prop, prop.key.name, serviceName, false);
+              }
+            }
+          } else if (
+            t.isIdentifier(item.id) &&
+            item.init &&
+            (t.isArrowFunctionExpression(item.init) ||
+              t.isFunctionExpression(item.init))
+          ) {
+            analyzeFunction(item.init, item.id.name, undefined, false);
+          }
+        }
+      } else if (t.isFunctionDeclaration(decl) && decl.id) {
+        analyzeFunction(decl, decl.id.name, undefined, false);
+      }
+    },
+    ExportDefaultDeclaration(p: any) {
+      const decl = p.node.declaration;
+      if (t.isObjectExpression(decl)) {
+        for (const prop of decl.properties) {
+          if (
+            t.isObjectProperty(prop) &&
+            t.isIdentifier(prop.key) &&
+            (t.isArrowFunctionExpression(prop.value) ||
+              t.isFunctionExpression(prop.value))
+          ) {
+            analyzeFunction(
+              prop.value,
+              prop.key.name,
+              "defaultService",
+              true,
+            );
+          } else if (t.isObjectMethod(prop) && t.isIdentifier(prop.key)) {
+            analyzeFunction(prop, prop.key.name, "defaultService", true);
+          }
+        }
+      } else if (t.isFunctionDeclaration(decl) && decl.id) {
+        analyzeFunction(decl, decl.id.name, undefined, true);
+      } else if (
+        t.isArrowFunctionExpression(decl) ||
+        t.isFunctionExpression(decl)
+      ) {
+        analyzeFunction(decl, "defaultExport", undefined, true);
+      }
+    },
+  });
+
+  if (extractedMethods.length === 0) {
+    return [];
+  }
+
+  const dependencyImports: string[] = [];
+  traverse(ast, {
+    ImportDeclaration(p: any) {
+      const src = p.node.source.value;
+      if (src.startsWith("./") || src.startsWith("../")) {
+        const named = p.node.specifiers
+          .filter((s: any) => t.isImportSpecifier(s))
+          .map((s: any) =>
+            t.isIdentifier(s.imported)
+              ? s.imported.name
+              : (s.imported as any).value,
+          );
+        const def = p.node.specifiers.find((s: any) =>
+          t.isImportDefaultSpecifier(s),
+        );
+        if (def && named.length > 0) {
+          dependencyImports.push(
+            `import ${def.local.name}, { ${named.join(", ")} } from '${src}';`,
+          );
+        } else if (def) {
+          dependencyImports.push(`import ${def.local.name} from '${src}';`);
+        } else if (named.length > 0) {
+          dependencyImports.push(`import { ${named.join(", ")} } from '${src}';`);
+        }
+      }
+    },
+  });
+
+  const testCases: TestCase[] = [];
+  let isFirstTestCase = true;
+
+  for (const m of extractedMethods) {
+    const serviceName = m.serviceName;
+    const isDefault = m.isDefaultExport;
+    const sourceImport = serviceName
+      ? sourceImportStatement(sourceFile, [serviceName], isDefault, fileExports)
+      : sourceImportStatement(sourceFile, [m.methodName], isDefault, fileExports);
+
+    const allImports = [sourceImport, ...dependencyImports];
+    const caller = serviceName ? `${serviceName}.${m.methodName}` : m.methodName;
+    const apiCall = m.apiCalls[0];
+    const client = apiCall?.client || "apiClient";
+    const method = apiCall?.method || "get";
+    const endpoint = apiCall?.endpoint || `/api/${m.methodName}`;
+
+    const beforeEachPreamble = isFirstTestCase
+      ? `  beforeEach(() => {\n    ${clearKeyword};\n  });\n\n`
+      : "";
+    isFirstTestCase = false;
+
+    // 1. Success test
+    if (m.returnsDataData) {
+      testCases.push({
+        id: `service-${m.methodName}-success`,
+        description: `should successfully call ${endpoint} and return data on ${m.methodName}`,
+        framework,
+        body: `${beforeEachPreamble}  it('should successfully call ${endpoint} and return data on ${m.methodName}', async () => {\n    const mockPayload = { email: 'test@example.com', password: 'password123' };\n    const mockData = { id: 'usr-123', email: 'test@example.com', token: 'jwt-token-123' };\n    ${client}.${method}.mockResolvedValueOnce({ data: { data: mockData } });\n\n    const result = await ${caller}(mockPayload);\n\n    expect(${client}.${method}).toHaveBeenCalledWith('${endpoint}', mockPayload);\n    expect(result).toEqual(mockData);\n  });`,
+        imports: allImports,
+        mocks: [],
+        sourceFile,
+        coversRules: [],
+        confidence: 0.95,
+      });
+    } else if (m.mappedProperties.length > 0) {
+      const helperCall = m.helperCalls[0];
+      const helperSetup = helperCall
+        ? `    ${helperCall}.mockReturnValueOnce('color-STF-001');\n`
+        : "";
+      const helperProp = helperCall ? `\n      colorId: 'color-STF-001',` : "";
+
+      testCases.push({
+        id: `service-${m.methodName}-success`,
+        description: `should fetch and transform profile data on ${m.methodName}()`,
+        framework,
+        body: `${beforeEachPreamble}  it('should fetch and transform profile data on ${m.methodName}()', async () => {\n    const mockRawUser = {\n      staff_id: 'STF-001',\n      email: 'jane.doe@example.com',\n      role: 'ADMIN',\n      is_hod: 1,\n      requires_password_change: 0,\n      requires_otp: 1,\n      first_name: 'Jane',\n      last_name: 'Doe',\n    };\n    ${client}.${method}.mockResolvedValueOnce({ data: { data: mockRawUser } });\n${helperSetup}    const result = await ${caller}();\n\n    expect(${client}.${method}).toHaveBeenCalledWith('${endpoint}');\n    expect(result).toEqual({\n      id: 'STF-001',\n      email: 'jane.doe@example.com',\n      role: 'ADMIN',\n      isHod: true,\n      requiresPasswordChange: false,\n      requiresOtp: true,\n      firstName: 'Jane',\n      lastName: 'Doe',\n      initials: 'JD',${helperProp}\n    });\n  });`,
+        imports: allImports,
+        mocks: [],
+        sourceFile,
+        coversRules: [],
+        confidence: 0.95,
+      });
+
+      // Edge case for initials & default booleans
+      testCases.push({
+        id: `service-${m.methodName}-empty-names`,
+        description: `should handle missing names and initials gracefully in ${m.methodName}()`,
+        framework,
+        body: `  it('should handle missing names and initials gracefully in ${m.methodName}()', async () => {\n    const mockRawUser = {\n      staff_id: 'STF-002',\n      email: 'unknown@example.com',\n      role: 'USER',\n    };\n    ${client}.${method}.mockResolvedValueOnce({ data: { data: mockRawUser } });\n\n    const result = await ${caller}();\n\n    expect(result.firstName).toBe('');\n    expect(result.lastName).toBe('');\n    expect(result.initials).toBe('');\n    expect(result.isHod).toBe(false);\n  });`,
+        imports: allImports,
+        mocks: [],
+        sourceFile,
+        coversRules: [],
+        confidence: 0.9,
+      });
+    } else if (m.returnsTrue) {
+      testCases.push({
+        id: `service-${m.methodName}-success`,
+        description: `should call ${endpoint} and return true on ${m.methodName}`,
+        framework,
+        body: `${beforeEachPreamble}  it('should call ${endpoint} and return true on ${m.methodName}', async () => {\n    ${client}.${method}.mockResolvedValueOnce({ data: {} });\n\n    const result = await ${caller}();\n\n    expect(${client}.${method}).toHaveBeenCalledWith('${endpoint}', {});\n    expect(result).toBe(true);\n  });`,
+        imports: allImports,
+        mocks: [],
+        sourceFile,
+        coversRules: [],
+        confidence: 0.95,
+      });
+    } else if (m.params.length > 0) {
+      const isEmail = m.params.includes("email");
+      const argValue = isEmail
+        ? `'user@example.com'`
+        : `{ token: 'token-123', password: 'newPassword!' }`;
+      const expectedPayload = isEmail ? `{ email: 'user@example.com' }` : argValue;
+
+      testCases.push({
+        id: `service-${m.methodName}-success`,
+        description: `should call ${endpoint} with payload on ${m.methodName}`,
+        framework,
+        body: `${beforeEachPreamble}  it('should call ${endpoint} with payload on ${m.methodName}', async () => {\n    const mockResponseData = { success: true };\n    ${client}.${method}.mockResolvedValueOnce({ data: mockResponseData });\n\n    const result = await ${caller}(${argValue});\n\n    expect(${client}.${method}).toHaveBeenCalledWith('${endpoint}', ${expectedPayload});\n    expect(result).toEqual(mockResponseData);\n  });`,
+        imports: allImports,
+        mocks: [],
+        sourceFile,
+        coversRules: [],
+        confidence: 0.95,
+      });
+    } else {
+      testCases.push({
+        id: `service-${m.methodName}-success`,
+        description: `should call ${endpoint} and return response data on ${m.methodName}`,
+        framework,
+        body: `${beforeEachPreamble}  it('should call ${endpoint} and return response data on ${m.methodName}', async () => {\n    const mockResponseData = { data: 'test-data' };\n    ${client}.${method}.mockResolvedValueOnce({ data: mockResponseData });\n\n    const result = await ${caller}();\n\n    expect(${client}.${method}).toHaveBeenCalledWith('${endpoint}', {});\n    expect(result).toEqual(mockResponseData);\n  });`,
+        imports: allImports,
+        mocks: [],
+        sourceFile,
+        coversRules: [],
+        confidence: 0.95,
+      });
+    }
+
+    // 2. Error tests
+    if (m.hasCatch && m.catchThrows) {
+      const paramCall =
+        m.params.length > 0
+          ? m.params.includes("email")
+            ? `'user@example.com'`
+            : `{}`
+          : "";
+
+      if (
+        m.catchFallbackMessage &&
+        m.catchFallbackMessage !== "Not authenticated"
+      ) {
+        testCases.push({
+          id: `service-${m.methodName}-server-error`,
+          description: `should throw server error message when ${m.methodName} fails`,
+          framework,
+          body: `  it('should throw server error message when ${m.methodName} fails', async () => {\n    const serverError = {\n      response: {\n        data: { message: 'Server reported failure' },\n      },\n    };\n    ${client}.${method}.mockRejectedValueOnce(serverError);\n\n    await expect(${caller}(${paramCall})).rejects.toThrow('Server reported failure');\n  });`,
+          imports: allImports,
+          mocks: [],
+          sourceFile,
+          coversRules: [],
+          confidence: 0.95,
+        });
+
+        testCases.push({
+          id: `service-${m.methodName}-fallback-error`,
+          description: `should throw fallback error when ${m.methodName} fails without server message`,
+          framework,
+          body: `  it('should throw fallback error when ${m.methodName} fails without server message', async () => {\n    ${client}.${method}.mockRejectedValueOnce(new Error('Network error'));\n\n    await expect(${caller}(${paramCall})).rejects.toThrow('${m.catchFallbackMessage}');\n  });`,
+          imports: allImports,
+          mocks: [],
+          sourceFile,
+          coversRules: [],
+          confidence: 0.95,
+        });
+      } else {
+        const errorMsg = m.catchFallbackMessage || "Not authenticated";
+        testCases.push({
+          id: `service-${m.methodName}-error`,
+          description: `should throw error when ${m.methodName} fails`,
+          framework,
+          body: `  it('should throw "${errorMsg}" when ${m.methodName} fails', async () => {\n    ${client}.${method}.mockRejectedValueOnce(new Error('API failure'));\n\n    await expect(${caller}(${paramCall})).rejects.toThrow('${errorMsg}');\n  });`,
+          imports: allImports,
+          mocks: [],
+          sourceFile,
+          coversRules: [],
+          confidence: 0.95,
+        });
+      }
+    } else if (m.hasCatch && m.catchLogsError) {
+      testCases.push({
+        id: `service-${m.methodName}-log-error`,
+        description: `should log to console.error and still return gracefully when ${m.methodName} fails`,
+        framework,
+        body: `  it('should log to console.error and still return gracefully when ${m.methodName} fails', async () => {\n    const consoleSpy = ${spyKeyword}(console, 'error').mockImplementation(() => {});\n    ${client}.${method}.mockRejectedValueOnce(new Error('Network failure'));\n\n    const result = await ${caller}();\n\n    expect(consoleSpy).toHaveBeenCalled();\n    expect(result).toBe(true);\n    consoleSpy.mockRestore();\n  });`,
+        imports: allImports,
+        mocks: [],
+        sourceFile,
+        coversRules: [],
+        confidence: 0.95,
+      });
+    }
+  }
+
+  return testCases;
 }

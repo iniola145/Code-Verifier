@@ -21,8 +21,8 @@ export const WELL_KNOWN_MOCKS: Record<
     isDefault: false,
     factory:
       fw === "jest"
-        ? `jest.mock('@react-navigation/stack', () => ({\n  createStackNavigator: () => ({\n    Navigator: ({ children }: any) => children,\n    Screen: ({ children }: any) => children,\n  }),\n}));`
-        : `vi.mock('@react-navigation/stack', () => ({\n  createStackNavigator: () => ({\n    Navigator: ({ children }: any) => children,\n    Screen: ({ children }: any) => children,\n  }),\n}));`,
+        ? `jest.mock('@react-navigation/stack', () => ({\n  createStackNavigator: () => ({\n    Navigator: ({ children }: { children?: unknown }) => children,\n    Screen: ({ children }: { children?: unknown }) => children,\n  }),\n}));`
+        : `vi.mock('@react-navigation/stack', () => ({\n  createStackNavigator: () => ({\n    Navigator: ({ children }: { children?: unknown }) => children,\n    Screen: ({ children }: { children?: unknown }) => children,\n  }),\n}));`,
   }),
 
   "expo-router": (fw) => ({
@@ -66,8 +66,8 @@ export const WELL_KNOWN_MOCKS: Record<
     isDefault: false,
     factory:
       fw === "jest"
-        ? `jest.mock('react-native-reanimated', () => ({\n  useSharedValue: (v: any) => ({ value: v }),\n  useAnimatedStyle: () => ({}),\n  withTiming: (v: any) => v,\n  withSpring: (v: any) => v,\n  runOnJS: (fn: any) => fn,\n}));`
-        : `vi.mock('react-native-reanimated', () => ({\n  useSharedValue: (v: any) => ({ value: v }),\n  useAnimatedStyle: () => ({}),\n  withTiming: (v: any) => v,\n  withSpring: (v: any) => v,\n  runOnJS: (fn: any) => fn,\n}));`,
+        ? `jest.mock('react-native-reanimated', () => ({\n  useSharedValue: (v: unknown) => ({ value: v }),\n  useAnimatedStyle: () => ({}),\n  withTiming: (v: unknown) => v,\n  withSpring: (v: unknown) => v,\n  runOnJS: (fn: unknown) => fn,\n}));`
+        : `vi.mock('react-native-reanimated', () => ({\n  useSharedValue: (v: unknown) => ({ value: v }),\n  useAnimatedStyle: () => ({}),\n  withTiming: (v: unknown) => v,\n  withSpring: (v: unknown) => v,\n  runOnJS: (fn: unknown) => fn,\n}));`,
   }),
 
   "expo-linking": (fw) => ({
@@ -86,6 +86,15 @@ export const WELL_KNOWN_MOCKS: Record<
       fw === "jest"
         ? `jest.mock('expo-secure-store', () => ({\n  getItemAsync: jest.fn(() => Promise.resolve(null)),\n  setItemAsync: jest.fn(() => Promise.resolve()),\n  deleteItemAsync: jest.fn(() => Promise.resolve()),\n}));`
         : `vi.mock('expo-secure-store', () => ({\n  getItemAsync: vi.fn(() => Promise.resolve(null)),\n  setItemAsync: vi.fn(() => Promise.resolve()),\n  deleteItemAsync: vi.fn(() => Promise.resolve()),\n}));`,
+  }),
+
+  axios: (fw) => ({
+    module: "axios",
+    isDefault: true,
+    factory:
+      fw === "jest"
+        ? `jest.mock('axios', () => {\n  const reqHandlers = [];\n  const resHandlers = [];\n  const mockAxiosInstance = {\n    defaults: { headers: {} },\n    interceptors: {\n      request: { use: jest.fn((f, r) => { reqHandlers.push({ fulfilled: f, rejected: r }); return reqHandlers.length - 1; }), handlers: reqHandlers },\n      response: { use: jest.fn((f, r) => { resHandlers.push({ fulfilled: f, rejected: r }); return resHandlers.length - 1; }), handlers: resHandlers },\n    },\n    get: jest.fn(() => Promise.resolve({ data: {} })),\n    post: jest.fn(() => Promise.resolve({ data: {} })),\n    put: jest.fn(() => Promise.resolve({ data: {} })),\n    delete: jest.fn(() => Promise.resolve({ data: {} })),\n  };\n  return {\n    __esModule: true,\n    default: {\n      ...mockAxiosInstance,\n      create: jest.fn((cfg) => {\n        mockAxiosInstance.defaults = { ...cfg };\n        return mockAxiosInstance;\n      }),\n    },\n    ...mockAxiosInstance,\n    create: jest.fn((cfg) => {\n      mockAxiosInstance.defaults = { ...cfg };\n      return mockAxiosInstance;\n    }),\n  };\n});`
+        : `vi.mock('axios', () => {\n  const reqHandlers = [];\n  const resHandlers = [];\n  const mockAxiosInstance = {\n    defaults: { headers: {} },\n    interceptors: {\n      request: { use: vi.fn((f, r) => { reqHandlers.push({ fulfilled: f, rejected: r }); return reqHandlers.length - 1; }), handlers: reqHandlers },\n      response: { use: vi.fn((f, r) => { resHandlers.push({ fulfilled: f, rejected: r }); return resHandlers.length - 1; }), handlers: resHandlers },\n    },\n    get: vi.fn(() => Promise.resolve({ data: {} })),\n    post: vi.fn(() => Promise.resolve({ data: {} })),\n    put: vi.fn(() => Promise.resolve({ data: {} })),\n    delete: vi.fn(() => Promise.resolve({ data: {} })),\n  };\n  return {\n    __esModule: true,\n    default: {\n      ...mockAxiosInstance,\n      create: vi.fn((cfg) => {\n        mockAxiosInstance.defaults = { ...cfg };\n        return mockAxiosInstance;\n      }),\n    },\n    ...mockAxiosInstance,\n    create: vi.fn((cfg) => {\n      mockAxiosInstance.defaults = { ...cfg };\n      return mockAxiosInstance;\n    }),\n  };\n});`,
   }),
 };
 
@@ -197,12 +206,87 @@ export function synthesizeMocks(ast: any, framework: TestFramework): MockSpec[] 
     if (mod.startsWith("./") || mod.startsWith("../")) {
       const parts: string[] = [];
 
+      // Helper to discover member methods accessed on an identifier in the AST
+      const getUsedMethods = (identifierName: string): Set<string> => {
+        const methods = new Set<string>();
+        traverse(ast, {
+          MemberExpression(mPath: any) {
+            if (
+              mPath.node.object &&
+              mPath.node.object.name === identifierName &&
+              mPath.node.property &&
+              mPath.node.property.name
+            ) {
+              methods.add(mPath.node.property.name);
+            }
+          },
+        });
+        return methods;
+      };
+
+      const fnBase = framework === "jest" ? "jest.fn" : "vi.fn";
+
       if (imp.defaultSpecifier) {
-        parts.push(`default: ${fnKeyword}`);
+        const methods = getUsedMethods(imp.defaultSpecifier);
+        const isApiClient =
+          [...methods].some((m) =>
+            ["get", "post", "put", "delete", "patch"].includes(m),
+          ) ||
+          /^(apiClient|client|api|httpClient)$/i.test(imp.defaultSpecifier);
+
+        if (isApiClient) {
+          const allMethods = Array.from(
+            new Set(["get", "post", "put", "delete", "patch", ...methods]),
+          );
+          const methodProps = allMethods
+            .map(
+              (m) =>
+                `${m}: ${fnBase}(() => Promise.resolve({ data: {} }))`,
+            )
+            .join(",\n    ");
+          parts.push(`default: {\n    ${methodProps},\n  }`);
+        } else if (methods.size > 0) {
+          const methodProps = [...methods]
+            .map((m) => `${m}: ${fnKeyword}`)
+            .join(",\n    ");
+          parts.push(`default: {\n    ${methodProps},\n  }`);
+        } else {
+          parts.push(`default: ${fnKeyword}`);
+        }
       }
 
       for (const named of imp.namedSpecifiers) {
-        parts.push(`${named}: ${fnKeyword}`);
+        const methods = getUsedMethods(named);
+        const isApiClient =
+          [...methods].some((m) =>
+            ["get", "post", "put", "delete", "patch"].includes(m),
+          ) || /^(apiClient|client|api|httpClient)$/i.test(named);
+
+        if (isApiClient) {
+          const allMethods = Array.from(
+            new Set(["get", "post", "put", "delete", "patch", ...methods]),
+          );
+          const methodProps = allMethods
+            .map(
+              (m) =>
+                `${m}: ${fnBase}(() => Promise.resolve({ data: {} }))`,
+            )
+            .join(",\n    ");
+          parts.push(`${named}: {\n    ${methodProps},\n  }`);
+        } else if (methods.size > 0) {
+          const methodProps = [...methods]
+            .map((m) => `${m}: ${fnKeyword}`)
+            .join(",\n    ");
+          parts.push(`${named}: {\n    ${methodProps},\n  }`);
+        } else {
+          if (/color/i.test(named)) {
+            parts.push(
+              `${named}: ${fnBase}((val) => (val ? 'color-' + val : 'default-color'))`,
+            );
+          } else {
+            parts.push(`${named}: ${fnKeyword}`);
+          }
+        }
       }
 
       if (imp.namespaceSpecifier && parts.length === 0) {

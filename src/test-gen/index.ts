@@ -6,3 +6,4 @@ export * from "./generator";
 export * from "./frameworks/jest";
 export * from "./frameworks/vitest";
 export * from "./frameworks/detox";
+export * from "./test-context";

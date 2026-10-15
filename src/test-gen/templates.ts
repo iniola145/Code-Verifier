@@ -84,6 +84,85 @@ function mergeImports(importLines: string[]): string[] {
 }
 
 /**
+ * Remove unused imports by checking if imported identifiers appear in mocks or test bodies.
+ */
+function treeShakeImports(importLines: string[], codeBodies: string): string[] {
+  const result: string[] = [];
+
+  for (const line of importLines) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("import ")) {
+      result.push(line);
+      continue;
+    }
+
+    // Side-effect imports: always keep
+    if (/^import\s+['"][^'"]+['"];?$/.test(trimmed)) {
+      result.push(line);
+      continue;
+    }
+
+    const match = trimmed.match(/^import\s+(.*?)\s+from\s+['"](.*?)['"];?$/);
+    if (!match) {
+      result.push(line);
+      continue;
+    }
+
+    const clause = match[1].trim();
+    const mod = match[2].trim();
+
+    let defaultName: string | undefined;
+    let isNamespace = false;
+    let namedImports: string[] = [];
+
+    if (clause.startsWith("* as ")) {
+      defaultName = clause.slice(5).trim();
+      isNamespace = true;
+    } else if (clause.startsWith("{") && clause.endsWith("}")) {
+      namedImports = clause
+        .slice(1, -1)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    } else if (clause.includes("{")) {
+      const [defPart, namedPart] = clause.split("{");
+      defaultName = defPart.replace(",", "").trim() || undefined;
+      namedImports = namedPart
+        .replace("}", "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    } else {
+      defaultName = clause;
+    }
+
+    const isUsed = (name: string) => {
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const regex = new RegExp(`\\b${escaped}\\b`);
+      return regex.test(codeBodies);
+    };
+
+    const usedDefault =
+      defaultName && isUsed(defaultName) ? defaultName : undefined;
+    const usedNamed = namedImports.filter(isUsed);
+
+    if (isNamespace && usedDefault) {
+      result.push(`import * as ${usedDefault} from '${mod}';`);
+    } else if (usedDefault && usedNamed.length > 0) {
+      result.push(
+        `import ${usedDefault}, { ${usedNamed.join(", ")} } from '${mod}';`,
+      );
+    } else if (usedDefault) {
+      result.push(`import ${usedDefault} from '${mod}';`);
+    } else if (usedNamed.length > 0) {
+      result.push(`import { ${usedNamed.join(", ")} } from '${mod}';`);
+    }
+  }
+
+  return result;
+}
+
+/**
  * Generate a complete test file from test cases.
  */
 export function generateTestFile(
@@ -101,6 +180,19 @@ export function generateTestFile(
   ].sort();
   const rawImports = testCases.flatMap((tc) => tc.imports);
   const allImports = mergeImports(rawImports);
+
+  // Framework runner imports (e.g. Vitest needs explicit describe, it, expect, vi, beforeEach)
+  const runnerImports: string[] = [];
+  if (framework === "vitest") {
+    const hasBeforeEach = testCases.some((tc) =>
+      tc.body.includes("beforeEach("),
+    );
+    const vitestFns = ["describe", "it", "expect", "vi"];
+    if (hasBeforeEach) {
+      vitestFns.push("beforeEach");
+    }
+    runnerImports.push(`import { ${vitestFns.join(", ")} } from 'vitest';`);
+  }
 
   // Collect and deduplicate mocks by module
   const seenMocks = new Set<string>();
@@ -132,9 +224,14 @@ export function generateTestFile(
 
   const header = sections.join("\n");
   const mocksBlock = allMocks.length > 0 ? allMocks.join("\n\n") : "";
-  const importsBlock = allImports.length > 0 ? allImports.join("\n") : "";
+
+  // Tree-shake imports against mocks and test bodies
+  const codeBodyForTreeShaking = mocksBlock + "\n" + testBodies;
+  const cleanImports = treeShakeImports(allImports, codeBodyForTreeShaking);
+  const importsBlock = cleanImports.length > 0 ? cleanImports.join("\n") : "";
 
   const parts = [header];
+  if (runnerImports.length > 0) parts.push(runnerImports.join("\n"));
   if (mocksBlock) parts.push(mocksBlock);
   if (importsBlock) parts.push(importsBlock);
 

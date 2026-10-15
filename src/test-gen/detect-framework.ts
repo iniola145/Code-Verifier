@@ -31,7 +31,7 @@ export function detectFramework(projectRoot: string): TestFramework {
       ...(pkg.devDependencies || {}),
     };
 
-    if (allDeps.vitest) return "vitest";
+    if (allDeps.vitest || allDeps.vite) return "vitest";
     if (allDeps.jest || allDeps["react-native"] || allDeps.expo) return "jest";
   } catch {
     // Fall back to jest

@@ -6,6 +6,7 @@ import { LLMFormatter } from "./formatter/llm-formatter";
 import { analyzeRuntimeTraces } from "./runtime/runtime-engine";
 import { parseTraceFile } from "./runtime/trace-parser";
 import { generateTestsForFile } from "./test-gen/generator";
+import { getTestContextForFile } from "./test-gen/test-context";
 import { TestFramework } from "./test-gen/types";
 import { createSession, loadSession, updateSession } from "./tdr/session-manager";
 import { verifyFix } from "./tdr/fix-verifier";
@@ -110,6 +111,25 @@ class MCPServer {
                   type: "array",
                   items: { type: "string" },
                   description: "Only generate tests for these rule IDs",
+                },
+              },
+              required: ["filePath"],
+            },
+          },
+          {
+            name: "get_test_context",
+            description:
+              "Extracts full architectural context (framework, synthesized mocks, exported contracts, AST endpoints, and latent defect findings) for an LLM to generate robust unit tests.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                filePath: {
+                  type: "string",
+                  description: "Source file to extract test context for",
+                },
+                code: {
+                  type: "string",
+                  description: "Optional source code override",
                 },
               },
               required: ["filePath"],
@@ -315,6 +335,35 @@ class MCPServer {
               {
                 type: "text",
                 text: `Error generating tests: ${err.message}`,
+              },
+            ],
+            isError: true,
+          });
+        }
+        return;
+      }
+
+      if (toolName === "get_test_context") {
+        const filePath = args.filePath;
+        const code = args.code;
+
+        try {
+          const report = await getTestContextForFile(filePath, code);
+          this.sendResponse(id, {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(report, null, 2),
+              },
+            ],
+            isError: false,
+          });
+        } catch (err: any) {
+          this.sendResponse(id, {
+            content: [
+              {
+                type: "text",
+                text: `Error getting test context: ${err.message}`,
               },
             ],
             isError: true,
