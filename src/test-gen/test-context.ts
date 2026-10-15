@@ -111,13 +111,23 @@ export async function getTestContextForFile(
           } else if (t.isTemplateLiteral(firstArg) && firstArg.quasis[0]) {
             apiEndpoint = firstArg.quasis.map((q: any) => q.value.raw).join("${...}");
           }
-        } else if (t.isIdentifier(callee) && callee.name === "fetch") {
+        } else if (t.isIdentifier(callee) && /^(apiRequest|request|fetchApi|queryApi|fetch)$/i.test(callee.name)) {
           httpMethod = "FETCH";
           const firstArg = cPath.node.arguments[0];
           if (t.isStringLiteral(firstArg)) {
             apiEndpoint = firstArg.value;
           } else if (t.isIdentifier(firstArg)) {
             apiEndpoint = firstArg.name;
+          } else if (t.isTemplateLiteral(firstArg) && firstArg.quasis[0]) {
+            apiEndpoint = firstArg.quasis.map((q: any) => q.value.raw).join("${...}");
+          }
+          const secondArg = cPath.node.arguments[1];
+          if (t.isObjectExpression(secondArg)) {
+            for (const prop of secondArg.properties) {
+              if (t.isObjectProperty(prop) && t.isIdentifier(prop.key) && prop.key.name === "method" && t.isStringLiteral(prop.value)) {
+                httpMethod = prop.value.value.toUpperCase();
+              }
+            }
           }
         }
       },

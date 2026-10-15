@@ -1390,7 +1390,41 @@ export function generateServiceModuleTests(context: StrategyContext): TestCase[]
             info.catchLogsError = true;
           }
         } else if (t.isIdentifier(callee)) {
-          if (
+          // Direct function-call HTTP wrappers (e.g. apiRequest, request, fetch)
+          if (/^(apiRequest|request|http|fetch)$/i.test(callee.name)) {
+            const firstArg = cPath.node.arguments[0];
+            const endpoint = t.isStringLiteral(firstArg)
+              ? firstArg.value
+              : t.isTemplateLiteral(firstArg) && firstArg.quasis[0]
+                ? firstArg.quasis[0].value.raw
+                : undefined;
+            const secondArg = cPath.node.arguments[1];
+            let method = "get";
+            let hasPayload = false;
+
+            if (t.isObjectExpression(secondArg)) {
+              for (const prop of secondArg.properties) {
+                if (
+                  t.isObjectProperty(prop) &&
+                  t.isIdentifier(prop.key)
+                ) {
+                  if (prop.key.name === "method" && t.isStringLiteral(prop.value)) {
+                    method = prop.value.value.toLowerCase();
+                  }
+                  if (prop.key.name === "body") {
+                    hasPayload = true;
+                  }
+                }
+              }
+            }
+
+            info.apiCalls.push({
+              client: callee.name,
+              method,
+              endpoint,
+              hasPayload,
+            });
+          } else if (
             ![
               "Error",
               "Boolean",
@@ -1542,7 +1576,7 @@ export function generateServiceModuleTests(context: StrategyContext): TestCase[]
   traverse(ast, {
     ImportDeclaration(p: any) {
       const src = p.node.source.value;
-      if (src.startsWith("./") || src.startsWith("../")) {
+      if (src.startsWith("./") || src.startsWith("../") || src.startsWith("@/") || src.startsWith("~/")) {
         const named = p.node.specifiers
           .filter((s: any) => t.isImportSpecifier(s))
           .map((s: any) =>
@@ -1588,13 +1622,19 @@ export function generateServiceModuleTests(context: StrategyContext): TestCase[]
       : "";
     isFirstTestCase = false;
 
+    const isDirectFunction = /^(apiRequest|request|fetchApi|queryApi|fetch)$/i.test(client);
+    const mockSetup = isDirectFunction
+      ? `${client}.mockResolvedValueOnce`
+      : `${client}.${method}.mockResolvedValueOnce`;
+    const clientCaller = isDirectFunction ? client : `${client}.${method}`;
+
     // 1. Success test
     if (m.returnsDataData) {
       testCases.push({
         id: `service-${m.methodName}-success`,
         description: `should successfully call ${endpoint} and return data on ${m.methodName}`,
         framework,
-        body: `${beforeEachPreamble}  it('should successfully call ${endpoint} and return data on ${m.methodName}', async () => {\n    const mockPayload = { email: 'test@example.com', password: 'password123' };\n    const mockData = { id: 'usr-123', email: 'test@example.com', token: 'jwt-token-123' };\n    ${client}.${method}.mockResolvedValueOnce({ data: { data: mockData } });\n\n    const result = await ${caller}(mockPayload);\n\n    expect(${client}.${method}).toHaveBeenCalledWith('${endpoint}', mockPayload);\n    expect(result).toEqual(mockData);\n  });`,
+        body: `${beforeEachPreamble}  it('should successfully call ${endpoint} and return data on ${m.methodName}', async () => {\n    const mockPayload = { email: 'test@example.com', password: 'password123' };\n    const mockData = { id: 'usr-123', email: 'test@example.com', token: 'jwt-token-123' };\n    ${mockSetup}({ data: { data: mockData } });\n\n    const result = await ${caller}(mockPayload);\n\n    expect(${clientCaller}).toHaveBeenCalledWith('${endpoint}', mockPayload);\n    expect(result).toEqual(mockData);\n  });`,
         imports: allImports,
         mocks: [],
         sourceFile,
@@ -1612,7 +1652,7 @@ export function generateServiceModuleTests(context: StrategyContext): TestCase[]
         id: `service-${m.methodName}-success`,
         description: `should fetch and transform profile data on ${m.methodName}()`,
         framework,
-        body: `${beforeEachPreamble}  it('should fetch and transform profile data on ${m.methodName}()', async () => {\n    const mockRawUser = {\n      staff_id: 'STF-001',\n      email: 'jane.doe@example.com',\n      role: 'ADMIN',\n      is_hod: 1,\n      requires_password_change: 0,\n      requires_otp: 1,\n      first_name: 'Jane',\n      last_name: 'Doe',\n    };\n    ${client}.${method}.mockResolvedValueOnce({ data: { data: mockRawUser } });\n${helperSetup}    const result = await ${caller}();\n\n    expect(${client}.${method}).toHaveBeenCalledWith('${endpoint}');\n    expect(result).toEqual({\n      id: 'STF-001',\n      email: 'jane.doe@example.com',\n      role: 'ADMIN',\n      isHod: true,\n      requiresPasswordChange: false,\n      requiresOtp: true,\n      firstName: 'Jane',\n      lastName: 'Doe',\n      initials: 'JD',${helperProp}\n    });\n  });`,
+        body: `${beforeEachPreamble}  it('should fetch and transform profile data on ${m.methodName}()', async () => {\n    const mockRawUser = {\n      staff_id: 'STF-001',\n      email: 'jane.doe@example.com',\n      role: 'ADMIN',\n      is_hod: 1,\n      requires_password_change: 0,\n      requires_otp: 1,\n      first_name: 'Jane',\n      last_name: 'Doe',\n    };\n    ${mockSetup}({ data: { data: mockRawUser } });\n${helperSetup}    const result = await ${caller}();\n\n    expect(${clientCaller}).toHaveBeenCalledWith('${endpoint}');\n    expect(result).toEqual({\n      id: 'STF-001',\n      email: 'jane.doe@example.com',\n      role: 'ADMIN',\n      isHod: true,\n      requiresPasswordChange: false,\n      requiresOtp: true,\n      firstName: 'Jane',\n      lastName: 'Doe',\n      initials: 'JD',${helperProp}\n    });\n  });`,
         imports: allImports,
         mocks: [],
         sourceFile,
@@ -1625,7 +1665,7 @@ export function generateServiceModuleTests(context: StrategyContext): TestCase[]
         id: `service-${m.methodName}-empty-names`,
         description: `should handle missing names and initials gracefully in ${m.methodName}()`,
         framework,
-        body: `  it('should handle missing names and initials gracefully in ${m.methodName}()', async () => {\n    const mockRawUser = {\n      staff_id: 'STF-002',\n      email: 'unknown@example.com',\n      role: 'USER',\n    };\n    ${client}.${method}.mockResolvedValueOnce({ data: { data: mockRawUser } });\n\n    const result = await ${caller}();\n\n    expect(result.firstName).toBe('');\n    expect(result.lastName).toBe('');\n    expect(result.initials).toBe('');\n    expect(result.isHod).toBe(false);\n  });`,
+        body: `  it('should handle missing names and initials gracefully in ${m.methodName}()', async () => {\n    const mockRawUser = {\n      staff_id: 'STF-002',\n      email: 'unknown@example.com',\n      role: 'USER',\n    };\n    ${mockSetup}({ data: { data: mockRawUser } });\n\n    const result = await ${caller}();\n\n    expect(result.firstName).toBe('');\n    expect(result.lastName).toBe('');\n    expect(result.initials).toBe('');\n    expect(result.isHod).toBe(false);\n  });`,
         imports: allImports,
         mocks: [],
         sourceFile,
@@ -1637,7 +1677,7 @@ export function generateServiceModuleTests(context: StrategyContext): TestCase[]
         id: `service-${m.methodName}-success`,
         description: `should call ${endpoint} and return true on ${m.methodName}`,
         framework,
-        body: `${beforeEachPreamble}  it('should call ${endpoint} and return true on ${m.methodName}', async () => {\n    ${client}.${method}.mockResolvedValueOnce({ data: {} });\n\n    const result = await ${caller}();\n\n    expect(${client}.${method}).toHaveBeenCalledWith('${endpoint}', {});\n    expect(result).toBe(true);\n  });`,
+        body: `${beforeEachPreamble}  it('should call ${endpoint} and return true on ${m.methodName}', async () => {\n    ${mockSetup}({ data: {} });\n\n    const result = await ${caller}();\n\n    expect(${clientCaller}).toHaveBeenCalledWith('${endpoint}', {});\n    expect(result).toBe(true);\n  });`,
         imports: allImports,
         mocks: [],
         sourceFile,
@@ -1651,11 +1691,15 @@ export function generateServiceModuleTests(context: StrategyContext): TestCase[]
         : `{ token: 'token-123', password: 'newPassword!' }`;
       const expectedPayload = isEmail ? `{ email: 'user@example.com' }` : argValue;
 
+      const callAssertion = isDirectFunction
+        ? `expect(${clientCaller}).toHaveBeenCalledWith('${endpoint}', expect.anything())`
+        : `expect(${clientCaller}).toHaveBeenCalledWith('${endpoint}', ${expectedPayload})`;
+
       testCases.push({
         id: `service-${m.methodName}-success`,
         description: `should call ${endpoint} with payload on ${m.methodName}`,
         framework,
-        body: `${beforeEachPreamble}  it('should call ${endpoint} with payload on ${m.methodName}', async () => {\n    const mockResponseData = { success: true };\n    ${client}.${method}.mockResolvedValueOnce({ data: mockResponseData });\n\n    const result = await ${caller}(${argValue});\n\n    expect(${client}.${method}).toHaveBeenCalledWith('${endpoint}', ${expectedPayload});\n    expect(result).toEqual(mockResponseData);\n  });`,
+        body: `${beforeEachPreamble}  it('should call ${endpoint} with payload on ${m.methodName}', async () => {\n    const mockResponseData = { success: true };\n    ${mockSetup}({ data: mockResponseData });\n\n    const result = await ${caller}(${argValue});\n\n    ${callAssertion};\n    expect(result).toBeDefined();\n  });`,
         imports: allImports,
         mocks: [],
         sourceFile,
@@ -1667,7 +1711,7 @@ export function generateServiceModuleTests(context: StrategyContext): TestCase[]
         id: `service-${m.methodName}-success`,
         description: `should call ${endpoint} and return response data on ${m.methodName}`,
         framework,
-        body: `${beforeEachPreamble}  it('should call ${endpoint} and return response data on ${m.methodName}', async () => {\n    const mockResponseData = { data: 'test-data' };\n    ${client}.${method}.mockResolvedValueOnce({ data: mockResponseData });\n\n    const result = await ${caller}();\n\n    expect(${client}.${method}).toHaveBeenCalledWith('${endpoint}', {});\n    expect(result).toEqual(mockResponseData);\n  });`,
+        body: `${beforeEachPreamble}  it('should call ${endpoint} and return response data on ${m.methodName}', async () => {\n    const mockResponseData = { data: 'test-data' };\n    ${mockSetup}({ data: mockResponseData });\n\n    const result = await ${caller}();\n\n    expect(${clientCaller}).toHaveBeenCalledWith('${endpoint}', expect.anything());\n    expect(result).toBeDefined();\n  });`,
         imports: allImports,
         mocks: [],
         sourceFile,

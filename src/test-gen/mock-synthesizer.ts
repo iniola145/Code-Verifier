@@ -202,8 +202,8 @@ export function synthesizeMocks(ast: any, framework: TestFramework): MockSpec[] 
       continue;
     }
 
-    // 2. Relative imports (e.g. ./api, ../services/auth)
-    if (mod.startsWith("./") || mod.startsWith("../")) {
+    // 2. Relative or path-aliased imports (e.g. ./api, ../services/auth, @/api/client, ~/utils)
+    if (mod.startsWith("./") || mod.startsWith("../") || mod.startsWith("@/") || mod.startsWith("~/")) {
       const parts: string[] = [];
 
       // Helper to discover member methods accessed on an identifier in the AST
@@ -273,6 +273,14 @@ export function synthesizeMocks(ast: any, framework: TestFramework): MockSpec[] 
             )
             .join(",\n    ");
           parts.push(`${named}: {\n    ${methodProps},\n  }`);
+        } else if (/^(apiRequest|request|fetchApi|queryApi)$/i.test(named)) {
+          parts.push(
+            `${named}: ${fnBase}(() => Promise.resolve({ status: 'success', data: {} }))`,
+          );
+        } else if (/schema$/i.test(named)) {
+          parts.push(
+            `${named}: {\n    parse: ${fnBase}((val: any) => val),\n    safeParse: ${fnBase}((val: any) => ({ success: true, data: val })),\n  }`,
+          );
         } else if (methods.size > 0) {
           const methodProps = [...methods]
             .map((m) => `${m}: ${fnKeyword}`)
