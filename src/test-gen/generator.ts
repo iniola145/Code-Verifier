@@ -10,6 +10,8 @@ import {
   getAllStrategies,
   getStrategiesForRule,
   generateServiceModuleTests,
+  getFileExports,
+  sourceImportStatement,
 } from "./strategies";
 import { generateTestFile } from "./templates";
 import {
@@ -116,8 +118,22 @@ export async function generateTestsForFile(
     }
   }
 
+  // Check if AST contains JSX elements/fragments or component contracts
+  let hasJsx = false;
+  traverse(ast, {
+    JSXElement() {
+      hasJsx = true;
+    },
+    JSXFragment() {
+      hasJsx = true;
+    },
+  });
+
+  const isComponent = hasJsx || contracts.length > 0;
+
   // If no specific finding triggered a strategy or file is clean, check for service modules
-  if (testCases.length === 0) {
+  // ONLY if the file is NOT a component
+  if (testCases.length === 0 && !isComponent) {
     const serviceTests = generateServiceModuleTests(context);
     if (serviceTests.length > 0) {
       testCases.push(...serviceTests);
@@ -127,33 +143,38 @@ export async function generateTestsForFile(
   // If still no test cases, generate a baseline test
   if (testCases.length === 0) {
     const baseName = path.basename(resolvedPath).replace(/\.(tsx?|jsx?)$/, "");
-
-    // Check if AST contains JSX elements/fragments or component contracts
-    let hasJsx = false;
-    traverse(ast, {
-      JSXElement() {
-        hasJsx = true;
-      },
-      JSXFragment() {
-        hasJsx = true;
-      },
-    });
-
-    const isComponent = hasJsx || contracts.length > 0;
+    const fileExports = getFileExports(ast);
+    const caller =
+      fileExports.defaultExportName ||
+      (fileExports.namedExports.values().next().value || baseName);
+    const isDefault =
+      fileExports.defaultExportName === caller ||
+      !fileExports.namedExports.has(caller);
+    const sourceImport = sourceImportStatement(
+      resolvedPath,
+      [caller],
+      isDefault,
+      fileExports,
+    );
 
     const isNative = isReactNativeProject(options?.projectRoot, code);
 
     if (isComponent) {
+      const renderAssertion = isNative
+        ? `const { toJSON } = render(<${caller} />);\n    expect(toJSON()).toBeDefined();`
+        : `const { container } = render(<${caller} />);\n    expect(container).toBeDefined();`;
+
       testCases.push({
         id: `baseline-${baseName}`,
-        description: `should render or load without crashing`,
+        description: `should render ${caller} without crashing`,
         framework,
-        body: `  it('loads module and renders without crashing', () => {\n    expect(true).toBe(true);\n  });`,
+        body: `  it('renders ${caller} without crashing', () => {\n    ${renderAssertion}\n  });`,
         imports: [
           `import React from 'react';`,
           isNative
             ? `import { render } from '@testing-library/react-native';`
             : `import { render } from '@testing-library/react';`,
+          sourceImport,
         ],
         mocks,
         sourceFile: resolvedPath,
@@ -173,11 +194,11 @@ export async function generateTestsForFile(
         confidence: 1.0,
       });
     }
-  } else {
-    // Attach synthesized mocks to test cases so template renders them
-    if (mocks.length > 0 && testCases[0]) {
-      testCases[0].mocks = [...mocks, ...testCases[0].mocks];
-    }
+  }
+
+  // Attach synthesized mocks to test cases so template renders them
+  if (mocks.length > 0 && testCases[0]) {
+    testCases[0].mocks = [...mocks, ...testCases[0].mocks];
   }
 
   // 7. Format complete test file

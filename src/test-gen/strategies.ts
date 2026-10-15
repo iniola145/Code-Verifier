@@ -43,7 +43,7 @@ interface ExtractedProp {
 }
 
 /** Information about file exports */
-interface FileExports {
+export interface FileExports {
   defaultExportName?: string;
   namedExports: Set<string>;
 }
@@ -51,7 +51,7 @@ interface FileExports {
 /**
  * Inspect AST to extract file exports (default export and named exports).
  */
-function getFileExports(ast: any): FileExports {
+export function getFileExports(ast: any): FileExports {
   let defaultExportName: string | undefined;
   const namedExports = new Set<string>();
 
@@ -547,7 +547,7 @@ function getRequiredPropsString(
 /**
  * Relative import statement for the source file.
  */
-function sourceImportStatement(
+export function sourceImportStatement(
   sourceFile: string,
   importedNames: string[],
   hasDefault = false,
@@ -1303,6 +1303,21 @@ interface ExtractedServiceMethod {
  */
 export function generateServiceModuleTests(context: StrategyContext): TestCase[] {
   const { ast, sourceFile, framework } = context;
+
+  // Never treat UI components containing JSX as API service modules
+  let hasJsx = false;
+  traverse(ast, {
+    JSXElement() {
+      hasJsx = true;
+    },
+    JSXFragment() {
+      hasJsx = true;
+    },
+  });
+  if (hasJsx) {
+    return [];
+  }
+
   const fileExports = getFileExports(ast);
   const spyKeyword = framework === "jest" ? "jest.spyOn" : "vi.spyOn";
   const clearKeyword =
@@ -1514,6 +1529,15 @@ export function generateServiceModuleTests(context: StrategyContext): TestCase[]
     return [];
   }
 
+  // Only test methods that actually execute API calls or return API response data
+  const actualServiceMethods = extractedMethods.filter(
+    (m) => m.apiCalls.length > 0 || m.returnsDataData || m.returnsData,
+  );
+
+  if (actualServiceMethods.length === 0) {
+    return [];
+  }
+
   const dependencyImports: string[] = [];
   traverse(ast, {
     ImportDeclaration(p: any) {
@@ -1545,7 +1569,7 @@ export function generateServiceModuleTests(context: StrategyContext): TestCase[]
   const testCases: TestCase[] = [];
   let isFirstTestCase = true;
 
-  for (const m of extractedMethods) {
+  for (const m of actualServiceMethods) {
     const serviceName = m.serviceName;
     const isDefault = m.isDefaultExport;
     const sourceImport = serviceName
