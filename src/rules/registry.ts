@@ -747,6 +747,12 @@ const METADATA: Record<string, MetadataFields> = {
     documentationUrl:
       "https://react.dev/reference/react/useState#updating-state-based-on-the-previous-state",
   },
+  "TEST-001": {
+    confidence: "HIGH",
+    requirements: ["AST"],
+    frameworks: ["REACT", "WEB", "REACT_NATIVE", "EXPO"],
+    documentationUrl: "https://testing-library.com/docs/react-testing-library/intro/",
+  },
 };
 
 function metadataFor(rule: VerificationRule): RuleMetadata {

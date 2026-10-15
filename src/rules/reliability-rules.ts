@@ -164,9 +164,96 @@ export const IgnoredMapResultRule: VerificationRule = {
   },
 };
 
+export const ReactTestAntiPatternRule: VerificationRule = {
+  id: "TEST-001",
+  name: "React Test Anti-Pattern",
+  description:
+    "Detects dangerous anti-patterns in React test files: monkey-patching private React internals (__CLIENT_INTERNALS), direct component invocation, or rigid child array traversal.",
+  category: "CORRECTNESS",
+  defaultSeverity: "HIGH",
+  check(ctx) {
+    const isTestFile = /\.(test|spec)\.[jt]sx?$/.test(ctx.filePath);
+
+    traverse(ctx.ast, {
+      MemberExpression(path) {
+        const prop = path.node.property;
+        let propName = "";
+        if (!path.node.computed && t.isIdentifier(prop)) {
+          propName = prop.name;
+        } else if (path.node.computed && t.isStringLiteral(prop)) {
+          propName = prop.value;
+        }
+
+        // 1. Check for React private internals (__CLIENT_INTERNALS, __SECRET_INTERNALS)
+        if (
+          propName.includes("__CLIENT_INTERNALS") ||
+          propName.includes("__SECRET_INTERNALS")
+        ) {
+          emit(
+            ctx,
+            path.node,
+            "TEST-001",
+            "CORRECTNESS",
+            "HIGH",
+            `Accessing private React internals (${propName}) in tests is an architectural anti-pattern.`,
+            "React internal symbols are private and change without warning across React versions. Mutating internal hook dispatchers (__CLIENT_INTERNALS) bypasses the real React scheduler and produces fragile tests that fail to detect real-world bugs.",
+            "Use standard '@testing-library/react' or '@testing-library/react-native' with render(<Component />), or mock dependencies cleanly at the module boundary."
+          );
+        }
+
+        // 2. Check for brittle child index traversal (e.g. section.props.children[2])
+        if (
+          isTestFile &&
+          path.node.computed &&
+          t.isNumericLiteral(prop) &&
+          t.isMemberExpression(path.node.object) &&
+          !path.node.object.computed &&
+          t.isIdentifier(path.node.object.property, { name: "children" })
+        ) {
+          emit(
+            ctx,
+            path.node,
+            "TEST-001",
+            "CORRECTNESS",
+            "MEDIUM",
+            "Traversing React element trees via child array indices (e.g. children[2]) is brittle.",
+            "Child array indexing breaks as soon as components wrap elements in Fragments or styling containers. It tests implementation details rather than user-facing behavior.",
+            "Render with a DOM test environment and query by text, role, or testid (e.g. screen.getByRole('button') or screen.getByText(...))."
+          );
+        }
+      },
+
+      CallExpression(path) {
+        if (!isTestFile) return;
+        const callee = path.node.callee;
+        if (!t.isIdentifier(callee)) return;
+        const name = callee.name;
+
+        // 3. Check for direct component invocation as a function
+        if (
+          /^[A-Z][a-zA-Z0-9]+Guard$|^[A-Z][a-zA-Z0-9]+Coordinator$|^[A-Z][a-zA-Z0-9]+Screen$|^[A-Z][a-zA-Z0-9]+Modal$/.test(name) ||
+          /^[A-Z][a-zA-Z0-9]+(Component|Layout|Card)$/.test(name)
+        ) {
+          emit(
+            ctx,
+            path.node,
+            "TEST-001",
+            "CORRECTNESS",
+            "MEDIUM",
+            `React component '${name}' is invoked directly as a function instead of rendered as JSX.`,
+            "Invoking React components as functions (e.g. AuthGuard()) bypasses React's reconciler, hooks lifecycle, and scheduler. Real bugs in hook dependencies, renders, or effects will be masked.",
+            `Render '${name}' using standard JSX syntax (e.g. render(<${name} />)) inside an environment configured with @testing-library/react.`
+          );
+        }
+      },
+    });
+  },
+};
+
 export const RELIABILITY_RULES: VerificationRule[] = [
   EmptyCatchRule,
   FinallyControlFlowRule,
   UnreachableStatementRule,
   IgnoredMapResultRule,
+  ReactTestAntiPatternRule,
 ];

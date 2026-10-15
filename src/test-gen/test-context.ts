@@ -4,7 +4,11 @@ import traverse from "@babel/traverse";
 import * as t from "@babel/types";
 import { CodeVerifier } from "../engine";
 import { parseSourceCode } from "../parser/ast";
-import { detectFramework } from "./detect-framework";
+import {
+  detectFramework,
+  isReactNativeProject,
+  detectDomEnvironment,
+} from "./detect-framework";
 import { generateMockCode, synthesizeMocks } from "./mock-synthesizer";
 import { TestFramework } from "./types";
 
@@ -286,11 +290,26 @@ export async function getTestContextForFile(
     `Ensure clean state between tests using beforeEach(() => { ${framework === "vitest" ? "vi.clearAllMocks()" : "jest.clearAllMocks()"}; }).`,
   ];
 
+  const isNative = isReactNativeProject(projectRoot, code);
+
   if (moduleClassification === "service") {
     guidelines.push("Mock all HTTP calls and verify expected URLs, payloads, and returned responses.");
     guidelines.push("Test both happy paths and server rejection/error handling with fallback messages.");
   } else if (moduleClassification === "component") {
-    guidelines.push("Render with @testing-library and test user interactions, prop updates, and accessibility.");
+    const testingLib = isNative ? "@testing-library/react-native" : "@testing-library/react";
+    const domEnv = detectDomEnvironment(projectRoot);
+
+    if (!isNative && (!domEnv.hasDomRunner || !domEnv.hasTestingLibrary)) {
+      guidelines.push(
+        "CRITICAL ARCHITECTURAL WARNING: Target project lacks a DOM test runner (jsdom/happy-dom) or @testing-library/react.",
+        "DO NOT attempt to monkey-patch React private internals (React.__CLIENT_INTERNALS), do NOT invoke components as plain functions (e.g. Component()), and do NOT traverse element child indices.",
+        "Proper component testing requires @testing-library/react with render(<Component />). Strongly recommend adding '@testing-library/react' and 'jsdom' (or 'happy-dom') to devDependencies, or test the underlying hooks and services independently."
+      );
+    } else {
+      guidelines.push(
+        `Render components with standard JSX (<Component />) using ${testingLib} and test user interactions, states, and DOM outputs.`
+      );
+    }
   } else if (moduleClassification === "client") {
     guidelines.push("Test client defaults (timeout, headers, withCredentials) and response/request interceptors.");
   }

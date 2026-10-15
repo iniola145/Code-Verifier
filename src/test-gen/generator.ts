@@ -19,8 +19,8 @@ import {
   TestFramework,
   TestGenOptions,
 } from "./types";
-import { detectFramework } from "./detect-framework";
-export { detectFramework };
+import { detectFramework, isReactNativeProject } from "./detect-framework";
+export { detectFramework, isReactNativeProject };
 
 /**
  * Generate tests for a single file.
@@ -141,6 +141,8 @@ export async function generateTestsForFile(
 
     const isComponent = hasJsx || contracts.length > 0;
 
+    const isNative = isReactNativeProject(options?.projectRoot, code);
+
     if (isComponent) {
       testCases.push({
         id: `baseline-${baseName}`,
@@ -149,7 +151,9 @@ export async function generateTestsForFile(
         body: `  it('loads module and renders without crashing', () => {\n    expect(true).toBe(true);\n  });`,
         imports: [
           `import React from 'react';`,
-          `import { render } from '@testing-library/react-native';`,
+          isNative
+            ? `import { render } from '@testing-library/react-native';`
+            : `import { render } from '@testing-library/react';`,
         ],
         mocks,
         sourceFile: resolvedPath,

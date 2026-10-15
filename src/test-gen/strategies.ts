@@ -7,6 +7,16 @@ import {
 } from "../project-ui-index";
 import { Diagnostic } from "../types/verifier";
 import { StrategyContext, TestCase, TestFramework } from "./types";
+import { isReactNativeProject } from "./detect-framework";
+
+/**
+ * Returns the appropriate @testing-library import for native vs web projects.
+ */
+function getRenderImport(isNative: boolean, extra: string[] = []): string {
+  const pkg = isNative ? "@testing-library/react-native" : "@testing-library/react";
+  const items = ["render", ...extra];
+  return `import { ${items.join(", ")} } from '${pkg}';`;
+}
 
 /**
  * A test generation strategy interface.
@@ -595,22 +605,25 @@ export const NullabilityStrategy: TestStrategy = {
       fileExports.defaultExportName === targetName ||
       !fileExports.namedExports.has(targetName);
 
-    // React Native testing imports
+    const isNative = isReactNativeProject(context.projectRoot, context.code);
     const testingImports = [
       `import React from 'react';`,
-      `import { render } from '@testing-library/react-native';`,
+      getRenderImport(isNative),
       sourceImportStatement(sourceFile, [targetName], isDefault, fileExports),
     ];
 
     if (funcInfo.isComponent) {
       const reqProps = getRequiredPropsString(targetName, context, finding);
       const propsAttr = reqProps ? ` ${reqProps}` : "";
+      const renderAssertion = isNative
+        ? `const { toJSON } = render(<${targetName}${propsAttr} />);\n    expect(toJSON()).toBeDefined();`
+        : `const { container } = render(<${targetName}${propsAttr} />);\n    expect(container).toBeDefined();`;
 
       testCases.push({
         id: `null-comp-${targetName}-${finding.ruleId}`,
         description: `should safely handle null/undefined states in ${targetName}`,
         framework,
-        body: `  it('should handle null or undefined input safely in ${targetName}', () => {\n    // Covers ${finding.ruleId} at line ${line}\n    const { toJSON } = render(<${targetName}${propsAttr} />);\n    expect(toJSON()).toBeDefined();\n  });`,
+        body: `  it('should handle null or undefined input safely in ${targetName}', () => {\n    // Covers ${finding.ruleId} at line ${line}\n    ${renderAssertion}\n  });`,
         imports: testingImports,
         mocks: [],
         sourceFile,
@@ -699,6 +712,8 @@ export const TaintFlowStrategy: TestStrategy = {
     ]);
     const propsAttr = reqProps ? ` ${reqProps}` : "";
 
+    const isNative = isReactNativeProject(context.projectRoot, context.code);
+
     if (finding.ruleId === "RN-SEC-001" || finding.ruleId === "SEC-006") {
       testCases.push({
         id: `taint-sec-${finding.ruleId}`,
@@ -707,7 +722,7 @@ export const TaintFlowStrategy: TestStrategy = {
         body: `  it('should not persist sensitive credentials in unencrypted storage', async () => {\n    // Covers ${finding.ruleId}\n    render(<${targetName}${propsAttr} route={{ params: { token: 'secret-token-123' } }} />);\n    await waitFor(() => {\n      expect(AsyncStorage.setItem).not.toHaveBeenCalledWith(\n        expect.stringMatching(/token|secret|auth|jwt/i),\n        expect.anything()\n      );\n    });\n  });`,
         imports: [
           `import React from 'react';`,
-          `import { render, waitFor } from '@testing-library/react-native';`,
+          getRenderImport(isNative, ['waitFor']),
           `import AsyncStorage from '@react-native-async-storage/async-storage';`,
           sourceImportStatement(
             sourceFile,
@@ -723,14 +738,18 @@ export const TaintFlowStrategy: TestStrategy = {
       });
     } else {
       // AI-TAINT-001 or RN-SEC-002: Taint into WebView or dangerous sink
+      const renderAssertion = isNative
+        ? `const { toJSON } = render(<${targetName}${propsAttr} route={route} />);\n    expect(toJSON()).toBeDefined();\n    // Verifies untrusted script tags do not flow unsanitized into the rendered sink\n    const serialized = JSON.stringify(toJSON());\n    expect(serialized).not.toContain('<script>alert(1)</script>');`
+        : `const { container } = render(<${targetName}${propsAttr} route={route} />);\n    expect(container).toBeDefined();\n    // Verifies untrusted script tags do not flow unsanitized into the rendered sink\n    const serialized = container.innerHTML;\n    expect(serialized).not.toContain('<script>alert(1)</script>');`;
+
       testCases.push({
         id: `taint-sink-${finding.ruleId}`,
         description: `should sanitize untrusted deep link or route parameters before rendering sink (${finding.ruleId})`,
         framework,
-        body: `  it('should sanitize untrusted input before rendering sink', async () => {\n    // Covers ${finding.ruleId}\n    const untrustedPayload = '<script>alert(1)</script>';\n    const route = { params: { untrustedHtml: untrustedPayload, query: untrustedPayload } };\n    const { toJSON } = render(<${targetName}${propsAttr} route={route} />);\n    expect(toJSON()).toBeDefined();\n    // Verifies untrusted script tags do not flow unsanitized into the rendered sink\n    const serialized = JSON.stringify(toJSON());\n    expect(serialized).not.toContain('<script>alert(1)</script>');\n  });`,
+        body: `  it('should sanitize untrusted input before rendering sink', async () => {\n    // Covers ${finding.ruleId}\n    const untrustedPayload = '<script>alert(1)</script>';\n    const route = { params: { untrustedHtml: untrustedPayload, query: untrustedPayload } };\n    ${renderAssertion}\n  });`,
         imports: [
           `import React from 'react';`,
-          `import { render } from '@testing-library/react-native';`,
+          getRenderImport(isNative),
           sourceImportStatement(
             sourceFile,
             [targetName],
@@ -776,14 +795,19 @@ export const ComponentContractStrategy: TestStrategy = {
       fileExports.defaultExportName === targetComp ||
       !fileExports.namedExports.has(targetComp);
 
+    const isNative = isReactNativeProject(context.projectRoot, context.code);
+    const renderAssertion = isNative
+      ? `const { toJSON } = render(<${targetComp}${propsAttr} />);\n    expect(toJSON()).toBeDefined();`
+      : `const { container } = render(<${targetComp}${propsAttr} />);\n    expect(container).toBeDefined();`;
+
     testCases.push({
       id: `contract-render-${targetComp}-${finding.ruleId}`,
       description: `should render ${targetComp} with all required contract props`,
       framework,
-      body: `  it('should render ${targetComp} with all required props satisfied', () => {\n    // Covers ${finding.ruleId}\n    const { toJSON } = render(<${targetComp}${propsAttr} />);\n    expect(toJSON()).toBeDefined();\n  });`,
+      body: `  it('should render ${targetComp} with all required props satisfied', () => {\n    // Covers ${finding.ruleId}\n    ${renderAssertion}\n  });`,
       imports: [
         `import React from 'react';`,
-        `import { render } from '@testing-library/react-native';`,
+        getRenderImport(isNative),
         sourceImportStatement(sourceFile, [targetComp], isDefault, fileExports),
       ],
       mocks: [],
@@ -831,6 +855,8 @@ export const RaceConditionStrategy: TestStrategy = {
       fileExports.defaultExportName === targetName ||
       !fileExports.namedExports.has(targetName);
 
+    const isNative = isReactNativeProject(context.projectRoot, context.code);
+
     if (funcInfo.isComponent) {
       const reqProps = getRequiredPropsString(targetName, context, finding, ["id"]);
       const propsAttr = reqProps ? ` ${reqProps}` : "";
@@ -842,7 +868,7 @@ export const RaceConditionStrategy: TestStrategy = {
         body: `  it('should handle concurrent updates safely in ${targetName} (${finding.ruleId})', async () => {\n    // Covers ${finding.ruleId} at line ${line}\n    const { rerender, queryByText } = render(<${targetName}${propsAttr} id="request-1" />);\n    // Rapid successive update before initial async request completes to simulate race condition\n    rerender(<${targetName}${propsAttr} id="request-2" />);\n    await waitFor(() => {\n      expect(queryByText('request-1')).toBeNull();\n    });\n  });`,
         imports: [
           `import React from 'react';`,
-          `import { render, waitFor } from '@testing-library/react-native';`,
+          getRenderImport(isNative, ['waitFor']),
           sourceImportStatement(
             sourceFile,
             [targetName],
@@ -904,18 +930,23 @@ export const AsyncPatternStrategy: TestStrategy = {
       fileExports.defaultExportName === targetName ||
       !fileExports.namedExports.has(targetName);
 
+    const isNative = isReactNativeProject(context.projectRoot, context.code);
+
     if (funcInfo.isComponent) {
       const reqProps = getRequiredPropsString(targetName, context, finding, ["route"]);
       const propsAttr = reqProps ? ` ${reqProps}` : "";
+      const renderAssertion = isNative
+        ? `const { toJSON, queryByText } = render(<${targetName}${propsAttr} route={errorRoute} />);\n    await waitFor(() => {\n      expect(toJSON()).toBeDefined();\n      expect(queryByText(/fatal error/i)).toBeNull();\n    });`
+        : `const { container, queryByText } = render(<${targetName}${propsAttr} route={errorRoute} />);\n    await waitFor(() => {\n      expect(container).toBeDefined();\n      expect(queryByText(/fatal error/i)).toBeNull();\n    });`;
 
       testCases.push({
         id: `async-${targetName}-${finding.ruleId}`,
         description: `should handle async rejection and errors gracefully in ${targetName} (${finding.ruleId})`,
         framework,
-        body: `  it('should handle async error pathways without unhandled rejection in ${targetName} (${finding.ruleId})', async () => {\n    // Covers ${finding.ruleId} at line ${line}\n    const errorRoute = { params: { error: 'Network failure', shouldFail: true } };\n    const { toJSON, queryByText } = render(<${targetName}${propsAttr} route={errorRoute} />);\n    await waitFor(() => {\n      expect(toJSON()).toBeDefined();\n      expect(queryByText(/fatal error/i)).toBeNull();\n    });\n  });`,
+        body: `  it('should handle async error pathways without unhandled rejection in ${targetName} (${finding.ruleId})', async () => {\n    // Covers ${finding.ruleId} at line ${line}\n    const errorRoute = { params: { error: 'Network failure', shouldFail: true } };\n    ${renderAssertion}\n  });`,
         imports: [
           `import React from 'react';`,
-          `import { render, waitFor } from '@testing-library/react-native';`,
+          getRenderImport(isNative, ['waitFor']),
           sourceImportStatement(
             sourceFile,
             [targetName],
