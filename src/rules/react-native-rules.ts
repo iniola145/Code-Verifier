@@ -361,6 +361,22 @@ function isSecretLike(name: string, value: string): boolean {
   return characterClasses >= 3;
 }
 
+/** Path segments marking test scope, where fixture credentials are conventional. */
+const TEST_EXEMPT_SEGMENTS = new Set(["__tests__", "__mocks__", "test", "tests"]);
+
+/**
+ * Test fixtures routinely carry sample credentials (fake JWTs, sandbox keys)
+ * and are excluded from the shipped client bundle, so the extraction
+ * rationale for this rule does not hold in test scope. Mirrors HYG-004's
+ * treatment of `tests/`.
+ */
+function isTestLikeFile(filePath: string): boolean {
+  const segments = filePath.split(/[\\/]/);
+  const base = segments[segments.length - 1] ?? "";
+  if (/\.(test|spec)\.[cm]?[jt]sx?$/i.test(base)) return true;
+  return segments.some((segment) => TEST_EXEMPT_SEGMENTS.has(segment));
+}
+
 function reportSecret(ctx: RuleContext, name: string, loc: any): void {
   ctx.report({
     id: `${ctx.filePath}:${loc.start.line}:${loc.start.column}:SEC-003`,
@@ -390,6 +406,10 @@ export const HardcodedSecretsRule: VerificationRule = {
   defaultSeverity: "CRITICAL",
   cweId: "CWE-798",
   check: (ctx: RuleContext) => {
+    // Test fixtures are never bundled into the shipped client (see
+    // isTestLikeFile), so flagging sample credentials there would be a false
+    // positive against this rule's extraction-exposure rationale.
+    if (isTestLikeFile(ctx.filePath)) return;
     traverse(ctx.ast, {
       // const apiKey = "sk_live_..."
       VariableDeclarator(path) {

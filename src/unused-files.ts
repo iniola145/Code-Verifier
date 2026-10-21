@@ -23,6 +23,12 @@ const ENTRY_STEMS = new Set([
   "jest.config",
   "jest.setup",
   "setupTests",
+  // Service workers are registered through browser APIs or build plugins
+  // (vite-plugin-pwa `injectManifest` with `srcDir: "src", filename: "sw.ts"`,
+  // Workbox generate-service-worker), never imported by app code.
+  "sw",
+  "serviceWorker",
+  "service-worker",
 ]);
 
 /**
@@ -257,7 +263,17 @@ export class ImportGraphIndex {
       byTarget = new Map();
       this.reExportedNames.set(key, byTarget);
     }
-    byTarget.set(target, names);
+    // A barrel can re-export the same target more than once (`export { X }`
+    // + `export type { XProps }`). Merge the name sets; a null (star or
+    // namespace re-export — exposes anything) dominates. A blind overwrite
+    // here drops the value names and strands the re-exported file.
+    const existing = byTarget.get(target);
+    if (existing === null || names === null) {
+      byTarget.set(target, null);
+      return;
+    }
+    if (!existing) byTarget.set(target, new Set(names));
+    else for (const name of names) existing.add(name);
   }
 
   private isReachableThroughReExport(
@@ -293,8 +309,42 @@ export class ImportGraphIndex {
   ): Set<string> | null {
     const declared = this.reExportedNames.get(barrel)?.get(target);
     if (declared !== null && declared !== undefined) return declared;
-    const targetExports = this.exportedNames.get(target);
-    return targetExports && targetExports.size > 0 ? targetExports : null;
+    // `export * from target`: the barrel exposes the target's whole public
+    // surface — its local exports plus everything the target itself pulls in
+    // through its own `export *` / `export {x} from` chains. Matching only on
+    // the target's local exports misses chained star re-exports (index ->
+    // service -> sibling service re-exported through `export *`), which made
+    // genuinely consumed modules look orphaned.
+    return this.publicSurface(target, new Set());
+  }
+
+  /**
+   * The names a module makes available to its importers: its local exports
+   * plus, transitively, every name exposed through its own re-exports. Returns
+   * null when the surface cannot be enumerated (a re-export cycle or an
+   * unknown target), which callers treat permissively rather than as an empty
+   * set — an under-approximated list here re-creates orphaned-file false
+   * positives on barrel files.
+   */
+  private publicSurface(file: string, seen: Set<string>): Set<string> | null {
+    const key = path.resolve(file);
+    if (seen.has(key)) return null; // re-export cycle: surface unknown
+    seen.add(key);
+    const surface = new Set<string>(this.exportedNames.get(key) ?? []);
+    const targets = this.reExports.get(key);
+    if (targets) {
+      for (const target of targets) {
+        const declared = this.reExportedNames.get(key)?.get(target);
+        if (declared !== null && declared !== undefined) {
+          for (const name of declared) surface.add(name);
+          continue;
+        }
+        const nested = this.publicSurface(target, seen);
+        if (nested === null) return null; // unknown part: stay permissive
+        for (const name of nested) surface.add(name);
+      }
+    }
+    return surface.size > 0 ? surface : null;
   }
 
   private importCanUseReExport(

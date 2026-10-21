@@ -41,6 +41,7 @@ export class SemanticAnalysisIndex {
         ts.isExpressionStatement(node) &&
         !ts.isVoidExpression(node.expression) &&
         this.isPromiseLike(node.expression) &&
+        !this.isSynchronousTestingAct(node.expression, source) &&
         !this.hasRejectionHandler(node.expression)
       ) {
         // MEDIUM, not HIGH: fire-and-forget UI helpers (haptics, toasts,
@@ -120,6 +121,55 @@ export class SemanticAnalysisIndex {
     );
   }
 
+  /**
+   * React Testing Library re-exports React's overloaded `act`. When a callback
+   * calls through an unresolved project alias, TypeScript sees its result as
+   * `any` and selects act's Promise-returning overload even though the callback
+   * is synchronous. Limit this exemption to the testing-library import and a
+   * non-async callback whose body is not itself known to return a Promise.
+   */
+  private isSynchronousTestingAct(
+    node: ts.Expression,
+    source: ts.SourceFile,
+  ): boolean {
+    if (!ts.isCallExpression(node) || !ts.isIdentifier(node.expression))
+      return false;
+    const localName = node.expression.text;
+    const importedAct = source.statements.some((statement) => {
+      if (
+        !ts.isImportDeclaration(statement) ||
+        !ts.isStringLiteral(statement.moduleSpecifier) ||
+        !/^@testing-library\/(?:react|react-native)$/.test(
+          statement.moduleSpecifier.text,
+        )
+      )
+        return false;
+      const bindings = statement.importClause?.namedBindings;
+      return (
+        !!bindings &&
+        ts.isNamedImports(bindings) &&
+        bindings.elements.some(
+          (element) =>
+            (element.propertyName?.text ?? element.name.text) === "act" &&
+            element.name.text === localName,
+        )
+      );
+    });
+    if (!importedAct) return false;
+
+    const callback = node.arguments[0];
+    if (
+      !callback ||
+      (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) ||
+      callback.modifiers?.some(
+        (modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword,
+      )
+    )
+      return false;
+    if (ts.isBlock(callback.body)) return true;
+    return !this.isPromiseLike(callback.body);
+  }
+
   private hasRejectionHandler(node: ts.Expression): boolean {
     if (ts.isParenthesizedExpression(node))
       return this.hasRejectionHandler(node.expression);
@@ -130,7 +180,20 @@ export class SemanticAnalysisIndex {
       ts.isBinaryExpression(node) &&
       node.operatorToken.kind === ts.SyntaxKind.EqualsToken
     )
-      return this.hasRejectionHandler(node.right);
+      return true;
+    // Logical assignment (`p ??= acquire()`, `p ||= acquire()`, `p &&= …`) is
+    // promise memoization: either a promise is already pending (the RHS is not
+    // evaluated) or the freshly created one is stored on the spot for the
+    // caller that reads the variable. The statement neither drops nor races
+    // the promise, so it is not a floating Promise.
+    if (
+      ts.isBinaryExpression(node) &&
+      (node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionEqualsToken ||
+        node.operatorToken.kind === ts.SyntaxKind.BarBarEqualsToken ||
+        node.operatorToken.kind ===
+          ts.SyntaxKind.AmpersandAmpersandEqualsToken)
+    )
+      return true;
     if (
       !ts.isCallExpression(node) ||
       !ts.isPropertyAccessExpression(node.expression)

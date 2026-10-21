@@ -92,7 +92,18 @@ export class ProjectUiIndex {
   }
 
   definedStyleObjectsForFile(filePath: string): Map<string, StyleObjectFact> {
-    return this.modules.get(path.resolve(filePath))?.styleObjects ?? new Map();
+    const resolved = path.resolve(filePath);
+    const module = this.modules.get(resolved);
+    const styles = module?.styleObjects ?? new Map();
+    return new Map(
+      [...styles].filter(
+        ([, fact]) =>
+          path.resolve(fact.sourceFile) === resolved ||
+          module?.cssImports.some(
+            (css) => path.resolve(css.filePath) === path.resolve(fact.sourceFile),
+          ),
+      ),
+    );
   }
 
   cssClassesForFile(filePath: string): Set<string> {

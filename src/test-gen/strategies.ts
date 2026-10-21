@@ -1623,8 +1623,9 @@ export function generateServiceModuleTests(context: StrategyContext): TestCase[]
     isFirstTestCase = false;
 
     const isDirectFunction = /^(apiRequest|request|fetchApi|queryApi|fetch)$/i.test(client);
+    const mockedFn = framework === "vitest" ? `vi.mocked(${client})` : `jest.mocked(${client})`;
     const mockSetup = isDirectFunction
-      ? `${client}.mockResolvedValueOnce`
+      ? `${mockedFn}.mockResolvedValueOnce`
       : `${client}.${method}.mockResolvedValueOnce`;
     const clientCaller = isDirectFunction ? client : `${client}.${method}`;
 

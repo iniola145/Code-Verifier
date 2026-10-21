@@ -43,6 +43,25 @@ function typeContainsNullish(node: unknown): boolean {
   );
 }
 
+function stateTypeIsNullish(
+  params: t.TSTypeParameterInstantiation | t.TypeParameterInstantiation,
+): boolean {
+  if (!t.isTSTypeParameterInstantiation(params)) return false;
+  const stateType = params.params[0];
+  if (!stateType) return false;
+  const unwrapped = t.isTSParenthesizedType(stateType)
+    ? stateType.typeAnnotation
+    : stateType;
+  if (t.isTSNullKeyword(unwrapped) || t.isTSUndefinedKeyword(unwrapped))
+    return true;
+  return (
+    t.isTSUnionType(unwrapped) &&
+    unwrapped.types.some(
+      (member) => t.isTSNullKeyword(member) || t.isTSUndefinedKeyword(member),
+    )
+  );
+}
+
 function identifierCanBeNullish(path: NodePath<t.Identifier>): boolean {
   const binding = path.scope.getBinding(path.node.name);
   if (!binding) return false;
@@ -283,7 +302,7 @@ function isNullableStateWithNonNullInitial(
   return !!(
     isUseState &&
     params &&
-    typeContainsNullish(params) &&
+    stateTypeIsNullish(params) &&
     initial &&
     !t.isNullLiteral(initial) &&
     !t.isIdentifier(initial, { name: "undefined" })
@@ -635,7 +654,8 @@ export const StaleAsyncStateUpdateRule: VerificationRule = {
         let readsState = false;
         path.get("arguments.0").traverse({
           Identifier(id) {
-            if (id.node.name === stateName) readsState = true;
+            if (id.node.name === stateName && id.isReferencedIdentifier())
+              readsState = true;
           },
         });
         if (!readsState) return;

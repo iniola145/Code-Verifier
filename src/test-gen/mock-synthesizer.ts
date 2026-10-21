@@ -88,6 +88,27 @@ export const WELL_KNOWN_MOCKS: Record<
         : `vi.mock('expo-secure-store', () => ({\n  getItemAsync: vi.fn(() => Promise.resolve(null)),\n  setItemAsync: vi.fn(() => Promise.resolve()),\n  deleteItemAsync: vi.fn(() => Promise.resolve()),\n}));`,
   }),
 
+  "react-router-dom": (fw) => ({
+    module: "react-router-dom",
+    isDefault: false,
+    factory:
+      fw === "jest"
+        ? `jest.mock('react-router-dom', () => ({\n  Navigate: ({ to }: { to: any }) => null,\n  Outlet: () => null,\n  useNavigate: () => jest.fn(),\n  useLocation: () => ({ pathname: '/', search: '', hash: '', state: null }),\n  useParams: () => ({}),\n  Link: ({ children, to }: { children?: any; to?: any }) => children,\n}));`
+        : `vi.mock('react-router-dom', () => ({\n  Navigate: ({ to }: { to: any }) => null,\n  Outlet: () => null,\n  useNavigate: () => vi.fn(),\n  useLocation: () => ({ pathname: '/', search: '', hash: '', state: null }),\n  useParams: () => ({}),\n  Link: ({ children, to }: { children?: any; to?: any }) => children,\n}));`,
+  }),
+
+  "lucide-react": (fw) => ({
+    module: "lucide-react",
+    isDefault: false,
+    factory: `${fw === "jest" ? "jest" : "vi"}.mock('lucide-react', () => new Proxy({}, { get: () => () => null }));`,
+  }),
+
+  "lucide-react-native": (fw) => ({
+    module: "lucide-react-native",
+    isDefault: false,
+    factory: `${fw === "jest" ? "jest" : "vi"}.mock('lucide-react-native', () => new Proxy({}, { get: () => () => null }));`,
+  }),
+
   axios: (fw) => ({
     module: "axios",
     isDefault: true,
@@ -135,6 +156,7 @@ function extractImports(ast: any): ImportInfo[] {
 
   traverse(ast, {
     ImportDeclaration(path) {
+      if (path.node.importKind === "type") return;
       const source = path.node.source.value;
       const info = getOrCreateInfo(source);
 
@@ -142,6 +164,7 @@ function extractImports(ast: any): ImportInfo[] {
         if (t.isImportDefaultSpecifier(spec)) {
           info.defaultSpecifier = spec.local.name;
         } else if (t.isImportSpecifier(spec)) {
+          if ((spec as any).importKind === "type") continue;
           const importedName = t.isIdentifier(spec.imported)
             ? spec.imported.name
             : (spec.imported as t.StringLiteral).value;
@@ -154,11 +177,13 @@ function extractImports(ast: any): ImportInfo[] {
       }
     },
     ExportNamedDeclaration(path) {
+      if (path.node.exportKind === "type") return;
       if (path.node.source) {
         const source = path.node.source.value;
         const info = getOrCreateInfo(source);
         for (const spec of path.node.specifiers) {
           if (t.isExportSpecifier(spec)) {
+            if ((spec as any).exportKind === "type") continue;
             const importedName = t.isIdentifier(spec.local)
               ? spec.local.name
               : (spec.local as any).value;
@@ -280,6 +305,14 @@ export function synthesizeMocks(ast: any, framework: TestFramework): MockSpec[] 
         } else if (/schema$/i.test(named)) {
           parts.push(
             `${named}: {\n    parse: ${fnBase}((val: any) => val),\n    safeParse: ${fnBase}((val: any) => ({ success: true, data: val })),\n  }`,
+          );
+        } else if (/routes|paths/i.test(named)) {
+          parts.push(
+            `${named}: new Proxy({}, { get: (_, prop) => typeof prop === 'string' ? '/' + prop.toLowerCase() : '/' })`,
+          );
+        } else if (/^use[A-Z]/.test(named)) {
+          parts.push(
+            `${named}: ${fnBase}(() => new Proxy({}, { get: () => undefined }))`,
           );
         } else if (methods.size > 0) {
           const methodProps = [...methods]

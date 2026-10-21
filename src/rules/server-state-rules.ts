@@ -41,7 +41,7 @@ function propertyOf(
   return null;
 }
 
-function referencedNames(path: NodePath): Set<string> {
+function referencedNames(path: NodePath<any>): Set<string> {
   const names = new Set<string>();
   if (path.isIdentifier() && path.isReferencedIdentifier())
     names.add(path.node.name);
@@ -51,6 +51,76 @@ function referencedNames(path: NodePath): Set<string> {
     },
   });
   return names;
+}
+
+/**
+ * Names computed from keyed inputs. A candidate counts as derived when it
+ * appears in the initializer of a keyed identifier — transitively, bounded
+ * depth — meaning the query key already depends on the data the candidate is
+ * built from (e.g. key contains `generationId` where
+ * `const generationId = offlineDetails?.catalogueGenerationId`).
+ */
+function derivedNamesFor(keyedNames: Set<string>, scopePath: NodePath): Set<string> {
+  const derived = new Set<string>();
+  for (const keyedName of keyedNames) {
+    const binding = scopePath.scope.getBinding(keyedName);
+    if (binding?.path.isVariableDeclarator())
+      collectDerivedNames(binding.path, derived, new Set([keyedName]), 3);
+  }
+  return derived;
+}
+
+function collectDerivedNames(
+  declarator: NodePath<t.VariableDeclarator>,
+  derived: Set<string>,
+  visiting: Set<string>,
+  depth: number,
+): void {
+  if (depth <= 0 || !declarator.node.init) return;
+  for (const name of referencedNames(declarator.get("init"))) {
+    if (visiting.has(name)) continue;
+    visiting.add(name);
+    derived.add(name);
+    if (depth > 1) {
+      const nested = declarator.scope.getBinding(name);
+      if (nested?.path.isVariableDeclarator())
+        collectDerivedNames(nested.path, derived, visiting, depth - 1);
+    }
+  }
+}
+
+/**
+ * True when a use of an identifier only projects it: a normal or optional
+ * member read off the identifier, or a null guard (`!v`, `v === null`,
+ * `v ?? fallback`, `Boolean(v)`). Projected member values are already shaped
+ * by the keyed derivation, so the source object adds no request input of its
+ * own; whole-object uses (passed around, spread, returned) still require
+ * direct key coverage.
+ */
+function isProjectionUse(identifier: NodePath<t.Identifier>): boolean {
+  const parent = identifier.parentPath?.node;
+  if (!parent) return false;
+  if (
+    (t.isMemberExpression(parent) || t.isOptionalMemberExpression(parent)) &&
+    parent.object === identifier.node
+  )
+    return true;
+  if (t.isUnaryExpression(parent) && parent.operator === "!") return true;
+  if (
+    t.isBinaryExpression(parent) &&
+    (parent.operator === "==" ||
+      parent.operator === "===" ||
+      parent.operator === "!=" ||
+      parent.operator === "!==") &&
+    (t.isNullLiteral(parent.left) || t.isNullLiteral(parent.right))
+  )
+    return true;
+  if (t.isLogicalExpression(parent) && parent.operator === "??") return true;
+  return (
+    t.isCallExpression(parent) &&
+    t.isIdentifier(parent.callee, { name: "Boolean" }) &&
+    parent.arguments.some((arg) => arg === identifier.node)
+  );
 }
 
 export const QueryKeyCompletenessRule: VerificationRule = {
@@ -85,6 +155,7 @@ export const QueryKeyCompletenessRule: VerificationRule = {
         if (!fnValue.isFunction()) return;
         const keyed = referencedNames(keyValue);
         const missing = new Set<string>();
+        const references = new Map<string, NodePath<t.Identifier>[]>();
         fnValue.traverse({
           Identifier(identifier) {
             if (
@@ -115,10 +186,28 @@ export const QueryKeyCompletenessRule: VerificationRule = {
                 return;
             }
             missing.add(name);
+            let refs = references.get(name);
+            if (!refs) {
+              refs = [];
+              references.set(name, refs);
+            }
+            refs.push(identifier);
           },
         });
         if (missing.size === 0) return;
-        const names = [...missing].sort().slice(0, 5);
+        // A candidate computed from a keyed input is covered when queryFn only
+        // projects it (member reads and null guards): the key already depends
+        // on the same source. E.g. key contains `generationId` derived from
+        // `offlineDetails`, while queryFn reads `offlineDetails.database`
+        // behind `if (!offlineDetails) throw`.
+        const derived = derivedNamesFor(keyed, keyValue);
+        const uncovered = [...missing].filter(
+          (name) =>
+            !derived.has(name) ||
+            !(references.get(name) ?? []).every((ref) => isProjectionUse(ref)),
+        );
+        if (uncovered.length === 0) return;
+        const names = uncovered.sort().slice(0, 5);
         report(
           ctx,
           keyProperty,
@@ -483,6 +572,21 @@ export const OfflineReplayIdentityRule: VerificationRule = {
         const method = memberName(path.node.callee);
         if (!method || !["add", "push", "enqueue", "setItem"].includes(method))
           return;
+        if (
+          method === "add" &&
+          t.isMemberExpression(path.node.callee) &&
+          t.isIdentifier(path.node.callee.object)
+        ) {
+          const binding = path.scope.getBinding(path.node.callee.object.name);
+          const init = binding?.path.isVariableDeclarator()
+            ? binding.path.node.init
+            : null;
+          if (
+            t.isNewExpression(init) &&
+            t.isIdentifier(init.callee, { name: "Set" })
+          )
+            return;
+        }
         const text = path.toString();
         if (!/(?:post|put|patch|delete|mutation|request|payload)/i.test(text))
           return;

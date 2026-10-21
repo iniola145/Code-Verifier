@@ -230,7 +230,16 @@ export function generateTestFile(
   const cleanImports = treeShakeImports(allImports, codeBodyForTreeShaking);
   const importsBlock = cleanImports.length > 0 ? cleanImports.join("\n") : "";
 
-  const parts = [header];
+  const parts: string[] = [];
+  const usesReactDomRender = allImports.some((imp) =>
+    imp.includes("@testing-library/react"),
+  );
+
+  if (framework === "vitest" && usesReactDomRender) {
+    parts.push("/** @vitest-environment happy-dom */");
+  }
+
+  parts.push(header);
   if (runnerImports.length > 0) parts.push(runnerImports.join("\n"));
   if (mocksBlock) parts.push(mocksBlock);
   if (importsBlock) parts.push(importsBlock);

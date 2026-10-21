@@ -158,8 +158,14 @@ export async function generateTestsForFile(
     );
 
     const isNative = isReactNativeProject(options?.projectRoot, code);
+    // A component must start with an uppercase letter or have component contracts
+    const isExportedComponent =
+      isComponent &&
+      caller &&
+      /^[A-Z]/.test(caller) &&
+      !/^(routes?|paths?|config|schema)$/i.test(caller);
 
-    if (isComponent) {
+    if (isExportedComponent) {
       const renderAssertion = isNative
         ? `const { toJSON } = render(<${caller} />);\n    expect(toJSON()).toBeDefined();`
         : `const { container } = render(<${caller} />);\n    expect(container).toBeDefined();`;
@@ -184,10 +190,10 @@ export async function generateTestsForFile(
     } else {
       testCases.push({
         id: `baseline-${baseName}`,
-        description: `should load module and export defined members`,
+        description: `should export defined ${caller} configuration or members`,
         framework,
-        body: `  it('loads module and exports defined members', () => {\n    expect(${baseName}Module).toBeDefined();\n  });`,
-        imports: [`import * as ${baseName}Module from './${baseName}';`],
+        body: `  it('should export defined ${caller} and match expected structure', () => {\n    expect(${caller}).toBeDefined();\n  });`,
+        imports: [sourceImport],
         mocks,
         sourceFile: resolvedPath,
         coversRules: [],

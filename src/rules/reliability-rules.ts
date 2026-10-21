@@ -41,7 +41,7 @@ export const EmptyCatchRule: VerificationRule = {
         const end = path.node.body.loc?.end.line ?? start;
         const bodyText = ctx.lines.slice(start - 1, end).join("\n");
         if (
-          /\b(?:ignore(?:d)?|intentional(?:ly)?|best[- ]effort|graceful fallback|optional)\b/i.test(
+          /\b(?:ignore(?:d)?|intentional(?:ly)?|best[- ]effort|graceful fallback|optional|handled by)\b/i.test(
             bodyText,
           )
         )

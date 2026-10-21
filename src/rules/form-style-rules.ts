@@ -393,6 +393,7 @@ export const UndefinedStyleNameRule: VerificationRule = {
   category: "CORRECTNESS",
   defaultSeverity: "MEDIUM",
   check(ctx) {
+    if (/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(ctx.filePath)) return;
     const facts = styleFacts(ctx);
     const cssClasses =
       ctx.projectUiIndex?.cssClassesForFile(ctx.filePath) ?? new Set<string>();

@@ -262,6 +262,30 @@ async function runTests() {
     "Detects secret in object literal",
   );
 
+  {
+    // vbook regression: sample JWT inside tests/e2e/helpers/coldStartFixtures.ts.
+    // Test files are excluded from the shipped client bundle, so this rule's
+    // extraction-exposure rationale does not apply in test scope.
+    const jwtFixture = `export const JWT_FIXTURE = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmaXh0dXJlIn0.coldStartSample";`;
+    const fixtureRes = await new CodeVerifier().verifyCode(
+      jwtFixture,
+      "tests/e2e/helpers/coldStartFixtures.ts",
+    );
+    assert(
+      !fixtureRes.diagnostics.some((d) => d.ruleId === "SEC-003"),
+      "Secrets inside test fixture files are exempt",
+      fixtureRes.diagnostics.map((d) => d.ruleId).join(", "),
+    );
+    const bundledRes = await new CodeVerifier().verifyCode(
+      jwtFixture,
+      "src/features/auth/apiClient.ts",
+    );
+    assert(
+      bundledRes.diagnostics.some((d) => d.ruleId === "SEC-003"),
+      "SEC-003 still flags the same secret outside test scope",
+    );
+  }
+
   await expectFinding(
     `
     function run() { eval(userInput); }
@@ -1122,6 +1146,11 @@ async function runTests() {
     "REL-001",
     "Documented best-effort catch is clean",
   );
+  await expectNoFinding(
+    `try { await mutation.mutateAsync(); } catch { /* Handled by mutation onError toast */ }`,
+    "REL-001",
+    "Catch delegated to an explicit mutation error handler is clean",
+  );
   await expectFinding(
     `function value() { try { return compute(); } finally { return fallback; } }`,
     "REL-002",
@@ -1897,6 +1926,10 @@ async function runTests() {
     "Optional-chain condition proves non-null base",
   );
   await expectClean(
+    `function f(attempt?: { kind: string; id: string } | null) { if (attempt?.kind === 'ready') return attempt.id; return ''; }`,
+    "Successful optional-chain equality proves non-null base",
+  );
+  await expectClean(
     `function f(u: { p: string } | null) { if (u.p) return u.p.length; return 0; }`,
     "Member condition proves base non-null",
   );
@@ -1984,6 +2017,11 @@ async function runTests() {
     "REACT-021",
     "Render-time guard protects nullable state",
   );
+  await expectNoFinding(
+    `function Form() { const [errors] = useState<Record<string, string | undefined>>({}); return errors.name; }`,
+    "REACT-021",
+    "Undefined nested record values do not make the state object nullable",
+  );
   await expectFinding(
     `export const name = (users: User[]) => users.find(u => u.active).name;`,
     "LOGIC-008",
@@ -2053,6 +2091,11 @@ async function runTests() {
     `function Counter() { const [count, setCount] = useState(0); const later = async () => { await save(); setCount(current => current + 1); }; return null; }`,
     "REACT-024",
     "Functional async state update is clean",
+  );
+  await expectNoFinding(
+    `function Status() { const [dirty, setDirty] = useState(false); const flush = async (controller) => { await controller.flush(); setDirty(controller.dirty); }; return null; }`,
+    "REACT-024",
+    "A same-named member property is not a captured state read",
   );
   await expectFinding(
     `export async function load() { const response = await fetch('/api/items'); return response.json(); }`,
@@ -2168,6 +2211,39 @@ async function runTests() {
     "QUERY-001",
     "React Query key with every request parameter is clean",
   );
+  await expectNoFinding(
+    `
+    function usePosCatalog(offlineDetails: { database: string; catalogueGenerationId: string } | undefined) {
+      const generationId = offlineDetails?.catalogueGenerationId ?? "";
+      return useQuery({
+        queryKey: ['pos-catalog', generationId],
+        queryFn: () => {
+          if (!offlineDetails) {
+            throw new Error('catalogue not ready');
+          }
+          return api.loadCatalog(offlineDetails.database);
+        },
+      });
+    }
+  `,
+    "QUERY-001",
+    "Derived key input with projection-only queryFn use is clean",
+  );
+  await expectFinding(
+    `
+    function usePosCart(offlineDetails: { database: string; catalogueGenerationId: string } | undefined) {
+      const generationId = offlineDetails?.catalogueGenerationId ?? "";
+      return useQuery({
+        queryKey: ['pos-cart', generationId],
+        queryFn: () => {
+          return api.buildCart(offlineDetails);
+        },
+      });
+    }
+  `,
+    "QUERY-001",
+    "Whole-object use of a derived input is still flagged",
+  );
   {
     const result = await verifier.verifyCode(
       `import axios from 'axios'; export const api = axios.create({ baseURL: '/api' });`,
@@ -2281,6 +2357,16 @@ async function runTests() {
     assert(
       !result.diagnostics.some((d) => d.ruleId === "OFFLINE-001"),
       "Offline write with replay identity is clean",
+    );
+  }
+  {
+    const result = await verifier.verifyCode(
+      `export function collect(payloads) { const protectedIds = new Set<string>(); for (const payload of payloads) protectedIds.add(payload.requestId); return protectedIds; }`,
+      "src/offline/catalogueProtection.ts",
+    );
+    assert(
+      !result.diagnostics.some((d) => d.ruleId === "OFFLINE-001"),
+      "Set membership collection is not treated as an offline write queue",
     );
   }
   await expectFinding(
@@ -2771,6 +2857,98 @@ async function runTests() {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 
+  console.log("— Hygiene: Chained Star Re-Exports and Service-Worker Entries");
+  {
+    // vbook regressions.
+    // 1. A barrel chain of two `export *` hops (index -> service -> sibling
+    //    service re-exported via an alias-qualified star re-export): the
+    //    barrel's exposed-name set must be the target's transitive public
+    //    surface, or a genuinely consumed sibling looked orphaned.
+    // 2. `src/sw.ts` generated for vite-plugin-pwa's injectManifest is a
+    //    service-worker entry registered through browser APIs, not imported.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cv-orphan-chain-"));
+    const write = (rel: string, content: string): void => {
+      const target = path.join(dir, rel);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, content);
+    };
+    write(
+      "src/features/auth/services/index.ts",
+      `export * from "./authService";\n`,
+    );
+    write(
+      "src/features/auth/services/authService.ts",
+      `export const signIn = (): number => 1;\nexport * from "@/features/auth/services/authAccountRecoveryService";\n`,
+    );
+    write(
+      "src/features/auth/services/authAccountRecoveryService.ts",
+      `export const recoverAccount = (): number => 2;\nexport const requestRecovery = (): number => 3;\n`,
+    );
+    write(
+      "src/features/auth/useAuthMutations.tsx",
+      `import { recoverAccount } from "@/features/auth/services";\nexport const run = (): number => recoverAccount();\n`,
+    );
+    write("src/sw.ts", `self.addEventListener("install", () => {});\n`);
+    fs.writeFileSync(
+      path.join(dir, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: { paths: { "@/*": ["./src/*"] } },
+        include: ["src"],
+      }),
+    );
+    const chainIndex = ImportGraphIndex.fromFiles(expandAllFiles(dir), dir);
+    const reachable = (rel: string): boolean =>
+      chainIndex.isReachable(path.join(dir, rel));
+    assert(
+      reachable("src/features/auth/services/authAccountRecoveryService.ts"),
+      "Chained star re-export surface is transitive: consumed sibling stays reachable",
+      "chained export *",
+    );
+    assert(
+      reachable("src/sw.ts"),
+      "Service-worker entry file (sw.ts) is exempt",
+      "sw entry",
+    );
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  console.log("— Hygiene: Value+Type Re-Export of the Same Target (folder barrel)");
+  {
+    // vbook regression (PosCart et al.). A folder barrel re-exporting the same
+    // target twice — `export { X } from './X.tsx'` followed by
+    // `export type { XProps } from './X.tsx'` — must MERGE the exposed-name
+    // sets. The old recordReExport overwrote the value names with the type
+    // names, so the consumer's `import { X }` no longer matched and the
+    // re-exported file looked orphaned.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cv-orphan-vtype-"));
+    const write = (rel: string, content: string): void => {
+      const target = path.join(dir, rel);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, content);
+    };
+    write(
+      "src/features/sales/components/pos/PosCart/PosCart.tsx",
+      `export interface PosCartProps { items: string[] }\nexport const PosCart = (props: PosCartProps): string => props.items[0];\n`,
+    );
+    write(
+      "src/features/sales/components/pos/PosCart/index.ts",
+      `export { PosCart } from './PosCart.tsx';\nexport type { PosCartProps } from './PosCart.tsx';\n`,
+    );
+    write(
+      "src/features/sales/components/pos/PosCartPanel/PosCartPanel.tsx",
+      `import { PosCart } from '../PosCart';\nexport const Panel = (): string => PosCart({ items: [] });\n`,
+    );
+    const index = ImportGraphIndex.fromFiles(expandAllFiles(dir), dir);
+    assert(
+      index.isReachable(
+        path.join(dir, "src/features/sales/components/pos/PosCart/PosCart.tsx"),
+      ),
+      "Folder barrel value+type re-export: consumer-imported value name stays reachable",
+      "value+type re-export merge",
+    );
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
   console.log("— Crash-Proofing");
   {
     const res = await verifier.verifyCode(`const broken = {`, "crash.ts");
@@ -2994,8 +3172,10 @@ async function runTests() {
       semanticFile,
       `
       async function check(): Promise<boolean> { return true; }
+      let stored: Promise<boolean> | null = null;
       async function run() {
         check();
+        stored = check();
         if (check()) console.log('always truthy');
         await check();
         void check();
@@ -3051,6 +3231,58 @@ async function runTests() {
     assert(
       !refreshResult.diagnostics.some((d) => d.ruleId === "TYPE-001"),
       "Promise rejection handling inside an assignment is recognized",
+    );
+
+    const memoFile = path.join(semanticRoot, "memo.ts");
+    fs.writeFileSync(
+      memoFile,
+      `let runtimePromise: Promise<void> | undefined;
+       async function openRuntime(): Promise<void> {}
+       function ensureRuntime(): void {
+         runtimePromise ??= openRuntime();
+       }
+       ensureRuntime();`,
+    );
+    const memoVerifier = new CodeVerifier({
+      semanticAnalysisIndex: SemanticAnalysisIndex.fromFiles([memoFile]),
+      projectRoot: semanticRoot,
+    });
+    const memoResult = await memoVerifier.verifyFile(memoFile);
+    assert(
+      !memoResult.diagnostics.some((d) => d.ruleId === "TYPE-001"),
+      "Logical-assignment promise memoization (??=) is not a floating promise",
+      memoResult.diagnostics.map((d) => d.ruleId).join(", "),
+    );
+
+    const actFile = path.join(semanticRoot, "act-test.tsx");
+    const actTypesFile = path.join(
+      semanticRoot,
+      "node_modules/@testing-library/react/index.d.ts",
+    );
+    fs.mkdirSync(path.dirname(actTypesFile), { recursive: true });
+    fs.writeFileSync(
+      actTypesFile,
+      `export function act<T>(callback: () => T | Promise<T>): Promise<T>;`,
+    );
+    fs.writeFileSync(
+      actFile,
+      `import { act } from "@testing-library/react";
+       declare const result: any;
+       act(() => result.current.addItem({ id: "p-1" }));
+       act(async () => { await Promise.resolve(); });`,
+    );
+    const actVerifier = new CodeVerifier({
+      semanticAnalysisIndex: SemanticAnalysisIndex.fromFiles([
+        actFile,
+        actTypesFile,
+      ]),
+      projectRoot: semanticRoot,
+    });
+    const actResult = await actVerifier.verifyFile(actFile);
+    assert(
+      actResult.diagnostics.filter((d) => d.ruleId === "TYPE-001").length === 1,
+      "Synchronous testing act is clean while unawaited async act is flagged",
+      actResult.diagnostics.map((d) => `${d.ruleId}:${d.loc.start.line}`).join(", "),
     );
 
     const reactNodeRoot = fs.mkdtempSync(

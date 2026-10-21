@@ -214,6 +214,17 @@ function refineExpression(
       }
       return;
     }
+    // A successful comparison such as `value?.kind === "ready"` proves the
+    // optional chain reached its property, so the base cannot be nullish on
+    // the true branch.
+    if (polarity) {
+      for (const operand of [expr.left, expr.right]) {
+        if (isMemberLike(operand) && operand.optional) {
+          const base = baseIdentifierOf(operand);
+          if (base) setNonNull(state, base, symbols);
+        }
+      }
+    }
     return;
   }
 
