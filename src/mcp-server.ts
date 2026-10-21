@@ -12,6 +12,7 @@ import { createSession, loadSession, updateSession } from "./tdr/session-manager
 import { verifyFix } from "./tdr/fix-verifier";
 import { startUITestSession, stopUITestSession, getUITestSession } from "./ui-test/session";
 import { generateBugReport } from "./ui-test/reporter";
+import { GoBridge } from "./adapters/go-bridge";
 
 /**
  * Lightweight JSON-RPC Model Context Protocol (MCP) Server
@@ -58,6 +59,7 @@ class MCPServer {
     if (method === "tools/list") {
       this.sendResponse(id, {
         tools: [
+          ...GoBridge.getGoToolDefinitions(),
           {
             name: "verify_code",
             description:
@@ -266,6 +268,12 @@ class MCPServer {
     if (method === "tools/call") {
       const toolName = params?.name;
       const args = params?.arguments || {};
+
+      if (GoBridge.isGoTool(toolName)) {
+        const goResult = await GoBridge.executeGoTool(toolName, args);
+        this.sendResponse(id, goResult);
+        return;
+      }
 
       if (toolName === "verify_code") {
         const code = args.code;
