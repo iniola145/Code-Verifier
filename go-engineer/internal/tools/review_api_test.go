@@ -11,8 +11,16 @@ func TestReviewAPIDesign(t *testing.T) {
 	project := t.TempDir()
 	writeFile(t, filepath.Join(project, "go.mod"), "module example.com/review\n\ngo 1.23\n")
 	writeFile(t, filepath.Join(project, "api.go"), `package api
-import ("context"; "database/sql"; "net/http"; "strings")
-func Create(w http.ResponseWriter, r *http.Request, ctx context.Context, db *sql.DB) { db.QueryContext(r.Context(), "x"); context.Background(); panic("x") }
+import ("context"; "database/sql"; "fmt"; "net/http"; "strings")
+func Create(w http.ResponseWriter, r *http.Request, ctx context.Context, db *sql.DB) {
+	db.QueryContext(r.Context(), "x")
+	context.Background()
+	panic("x")
+	query := fmt.Sprintf("SELECT * FROM users WHERE id = '%s'", r.URL.Query().Get("id"))
+	db.Query(query)
+	resp, _ := http.Get("http://example.com")
+	_ = resp
+}
 func Check(err error) bool { return err.Error() == "bad" || strings.Contains(err.Error(), "bad") }
 func Routes(r *Router) { r.POST("/createUser", Create) }
 type Router struct{}
@@ -21,7 +29,15 @@ type Router struct{}
 	if err != nil {
 		t.Fatal(err)
 	}
-	wanted := map[string]bool{"handler-direct-db": true, "context-background-with-existing-context": true, "panic-request-path": true, "error-string-classification": true, "rpc-style-route": true}
+	wanted := map[string]bool{
+		"handler-direct-db":                        true,
+		"context-background-with-existing-context": true,
+		"panic-request-path":                       true,
+		"error-string-classification":              true,
+		"rpc-style-route":                          true,
+		"sql-raw-concatenation":                    true,
+		"http-response-body-unclosed":              true,
+	}
 	for _, f := range got.Findings {
 		delete(wanted, f.Rule)
 	}

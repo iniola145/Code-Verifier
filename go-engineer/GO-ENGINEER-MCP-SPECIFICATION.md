@@ -49,8 +49,10 @@ Produces evidence-based findings, not a quality score. Current stable rules are:
 - panic-request-path
 - error-string-classification
 - rpc-style-route
+- sql-raw-concatenation
+- http-response-body-unclosed
 
-It detects likely HTTP handlers through http.ResponseWriter and *http.Request signatures, uses conservative service/application path signals, requires database/sql evidence for direct database findings, and only recognizes limited literal router patterns. Findings contain rule, category, severity, location, description, evidence, and guideline URI; some include source values general-guideline or project-convention. Findings are deterministically sorted.
+It detects likely HTTP handlers through http.ResponseWriter and *http.Request signatures, uses conservative service/application path signals, requires database/sql evidence for direct database findings, checks for raw SQL string concatenation/formatting, verifies HTTP response body defer close statements, and only recognizes limited literal router patterns. Findings contain rule, category, severity, location, description, evidence, and guideline URI; some include source values general-guideline or project-convention. Findings are deterministically sorted.
 
 ### get_project_conventions
 
@@ -67,6 +69,10 @@ Input: project_path, symbol, and optional kind, receiver, package_path. Traversa
 ### inspect_go_symbol
 
 Input: project_path, relative file_path, symbol, and optional receiver. Absolute paths, directory traversal, non-existent files, and non-Go files are rejected. go/parser and go/ast find the exact declaration in the file. Ambiguous declarations (such as multiple methods with differing receivers) require specifying receiver. Source snippets are extracted and formatted using go/format, capped at 100 KB with truncation reporting. Output includes relative file path, package name, kind, line numbers, exported status, and formatted source.
+
+### generate_go_test_scaffold
+
+Input: project_path, relative file_path, and symbol. Absolute paths, traversal, non-existent files, and non-Go files are rejected. Locates the function or method declaration and extracts parameters, receivers, and returns. If the function matches HTTP handler conventions (`http.ResponseWriter`, `*http.Request`), emits a table-driven test scaffold with `net/http/httptest` (`httptest.NewRequest`, `httptest.NewRecorder`) and status validation. Otherwise, emits an idiomatic table-driven unit test structure with `t.Run`. Formatted with `go/format`.
 
 ## Project configuration
 
@@ -111,7 +117,7 @@ cmd/server/{main.go,main_test.go}
 internal/config/{config.go,config_test.go}
 internal/guidelines/{guidelines.go,guidelines_test.go}
 internal/prompts/{api_workflow.go,api_workflow_test.go}
-internal/tools/{analyze_file.go,analyze_file_test.go,find_symbol.go,find_symbol_test.go,inspect_package.go,inspect_package_test.go,inspect_project.go,inspect_project_test.go,inspect_symbol.go,inspect_symbol_test.go,review_api.go,review_api_test.go,run_tests.go,run_tests_test.go,suggest_config.go,suggest_config_test.go}
+internal/tools/{analyze_file.go,analyze_file_test.go,find_symbol.go,find_symbol_test.go,generate_test_scaffold.go,generate_test_scaffold_test.go,inspect_package.go,inspect_package_test.go,inspect_project.go,inspect_project_test.go,inspect_symbol.go,inspect_symbol_test.go,review_api.go,review_api_test.go,run_tests.go,run_tests_test.go,suggest_config.go,suggest_config_test.go}
 PROJECT-CONFIGURATION.md
 README.md
 WORKFLOW.md

@@ -42,6 +42,7 @@ func TestServerE2E(t *testing.T) {
 		"suggest_project_config",
 		"inspect_go_symbol",
 		"find_go_symbol",
+		"generate_go_test_scaffold",
 	}
 
 	toolMap := make(map[string]bool)

@@ -177,8 +177,14 @@ func reviewFile(review *APIReview, file, packagePath string, f *ast.File, projec
 			if isErrorStringClassification(call) {
 				addFinding(review, "error-string-classification", "error-handling", "warning", file, name, "Possible error-classification concern: error text is inspected instead of using errors.Is/errors.As.", exprString(call), "go://guidelines/error-handling")
 			}
+			if database && (isSQLFormatInjection(call) || isSQLConcatenation(call)) {
+				addFinding(review, "sql-raw-concatenation", "security", "warning", file, name, "Possible SQL injection concern: SQL query is constructed using dynamic string formatting or concatenation.", exprString(call), "go://guidelines/api-design")
+			}
 			return true
 		})
+		if hasHTTPClientCall(fd) && !hasBodyCloseDefer(fd) {
+			addFinding(review, "http-response-body-unclosed", "resource-leak", "warning", file, name, "Possible resource leak: HTTP client response body may not be closed via defer resp.Body.Close().", name, "go://guidelines/handlers")
+		}
 	}
 	ast.Inspect(f, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
@@ -247,6 +253,57 @@ func isPanic(c *ast.CallExpr) bool { return exprString(c.Fun) == "panic" }
 func isErrorStringClassification(c *ast.CallExpr) bool {
 	s := exprString(c)
 	return strings.Contains(s, "err.Error() ==") || strings.Contains(s, "strings.Contains(err.Error()")
+}
+func isSQLFormatInjection(c *ast.CallExpr) bool {
+	s := exprString(c.Fun)
+	if s == "fmt.Sprintf" {
+		if len(c.Args) > 0 {
+			if lit, ok := c.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+				val := strings.ToUpper(lit.Value)
+				return strings.Contains(val, "SELECT ") || strings.Contains(val, "INSERT ") || strings.Contains(val, "UPDATE ") || strings.Contains(val, "DELETE ")
+			}
+		}
+	}
+	return false
+}
+func isSQLConcatenation(c *ast.CallExpr) bool {
+	s := exprString(c.Fun)
+	if strings.Contains(s, ".Query") || strings.Contains(s, ".Exec") {
+		for _, arg := range c.Args {
+			if b, ok := arg.(*ast.BinaryExpr); ok && b.Op == token.ADD {
+				return true
+			}
+		}
+	}
+	return false
+}
+func hasHTTPClientCall(f *ast.FuncDecl) bool {
+	found := false
+	ast.Inspect(f.Body, func(n ast.Node) bool {
+		if call, ok := n.(*ast.CallExpr); ok {
+			s := exprString(call.Fun)
+			if s == "http.Get" || s == "http.Post" || strings.Contains(s, ".Do(") || strings.HasSuffix(s, ".Do") {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
+}
+func hasBodyCloseDefer(f *ast.FuncDecl) bool {
+	found := false
+	ast.Inspect(f.Body, func(n ast.Node) bool {
+		if def, ok := n.(*ast.DeferStmt); ok {
+			s := exprString(def.Call)
+			if strings.Contains(s, ".Body.Close()") {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
 }
 func routeLiteral(c *ast.CallExpr) (string, bool) {
 	s := exprString(c.Fun)

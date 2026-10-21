@@ -55,6 +55,11 @@ type FindGoSymbolInput struct {
 	Receiver    string `json:"receiver,omitempty" jsonschema:"Optional method receiver"`
 	PackagePath string `json:"package_path,omitempty" jsonschema:"Optional relative package"`
 }
+type GenerateGoTestScaffoldInput struct {
+	ProjectPath string `json:"project_path" jsonschema:"Path to the Go project"`
+	FilePath    string `json:"file_path" jsonschema:"Relative path to the Go file"`
+	Symbol      string `json:"symbol" jsonschema:"Name of the function or method to generate tests for"`
+}
 type ProjectConventionsOutput struct {
 	Configured  bool                 `json:"configured"`
 	File        string               `json:"file"`
@@ -104,6 +109,7 @@ func newServer() *mcp.Server {
 	mcp.AddTool(server, &mcp.Tool{Name: "suggest_project_config", Description: "Inspect a Go project and suggest optional project-specific engineering conventions with supporting evidence."}, suggestProjectConfigHandler)
 	mcp.AddTool(server, &mcp.Tool{Name: "inspect_go_symbol", Description: "Inspect one Go declaration from one source file for targeted implementation reasoning."}, inspectGoSymbolHandler)
 	mcp.AddTool(server, &mcp.Tool{Name: "find_go_symbol", Description: "Search the repository for exact Go declaration names; returns locations only, not source or references."}, findGoSymbolHandler)
+	mcp.AddTool(server, &mcp.Tool{Name: "generate_go_test_scaffold", Description: "Generate an idiomatic table-driven unit test or httptest scaffold for a Go function or HTTP handler."}, generateGoTestScaffoldHandler)
 	for _, guideline := range guidelines.All() {
 		item := guideline
 		server.AddResource(&mcp.Resource{
@@ -133,6 +139,14 @@ func findGoSymbolHandler(ctx context.Context, _ *mcp.CallToolRequest, input Find
 	result, err := tools.FindGoSymbol(ctx, input.ProjectPath, input.Symbol, input.Kind, input.Receiver, input.PackagePath)
 	if err != nil {
 		return nil, tools.SymbolSearchResult{}, err
+	}
+	return nil, result, nil
+}
+
+func generateGoTestScaffoldHandler(ctx context.Context, _ *mcp.CallToolRequest, input GenerateGoTestScaffoldInput) (*mcp.CallToolResult, tools.TestScaffoldResult, error) {
+	result, err := tools.GenerateGoTestScaffold(ctx, input.ProjectPath, input.FilePath, input.Symbol)
+	if err != nil {
+		return nil, tools.TestScaffoldResult{}, err
 	}
 	return nil, result, nil
 }

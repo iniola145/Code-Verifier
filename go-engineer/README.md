@@ -15,7 +15,7 @@ It inspects Go modules, files, packages, and declarations via AST parsing, runs 
 
 ### Features & Capabilities
 
-#### 1. MCP Tools (9)
+#### 1. MCP Tools (10)
 
 | Tool | Description |
 |---|---|
@@ -23,11 +23,12 @@ It inspects Go modules, files, packages, and declarations via AST parsing, runs 
 | `run_go_tests` | Executes bounded `go test` with package pattern validation and output size limits. |
 | `analyze_go_file` | Parses AST to extract imports, types, structs, interfaces, functions, and variables. |
 | `inspect_go_package` | Analyzes immediate package files, separating production and test code. |
-| `review_api_design` | Evaluates HTTP/API packages against structural rules (handler DB leaks, context roots, panics, RPC routes). |
+| `review_api_design` | Evaluates HTTP/API packages against structural rules (handler DB leaks, context roots, panics, RPC routes, SQL injection, HTTP body leaks). |
 | `get_project_conventions` | Reads optional `.go-engineer.yaml` project conventions (architecture, router, layer packages). |
 | `suggest_project_config` | Scans imports and directory patterns to heuristically suggest conventions with confidence levels. |
 | `inspect_go_symbol` | Locates and extracts formatted source and line numbers for a specific Go declaration. |
 | `find_go_symbol` | Searches the repository for exact Go symbol names across functions, types, constants, and variables. |
+| `generate_go_test_scaffold` | Synthesizes an idiomatic table-driven unit test or `httptest` scaffold for any function or handler. |
 
 #### 2. Guideline Resources (7)
 
