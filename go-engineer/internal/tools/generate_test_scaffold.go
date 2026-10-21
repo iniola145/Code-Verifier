@@ -171,3 +171,4 @@ func buildScaffoldCode(pkg string, fn *ast.FuncDecl, testName string, isHTTP boo
 
 	return buf.String(), importsList
 }
+

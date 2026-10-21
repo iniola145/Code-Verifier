@@ -1,0 +1,20 @@
+version: 1
+project:
+  architecture: layered
+http:
+  router: stdlib
+packages:
+  handlers:
+    - internal/handlers
+  services:
+    - internal/services
+  repositories:
+    - internal/repository
+database:
+  direct_access_from_handlers: false
+errors:
+  classification: errors-is-as
+context:
+  require_propagation: true
+testing:
+  default_package: ./...

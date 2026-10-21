@@ -58,3 +58,4 @@ func CalculateTax(amount float64) (float64, error) {
 		t.Errorf("expected error for non-existent function, got nil")
 	}
 }
+
