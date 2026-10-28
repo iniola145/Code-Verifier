@@ -90,6 +90,56 @@ function collectDerivedNames(
 }
 
 /**
+ * Checks whether an un-keyed candidate object passed whole into queryFn has multiple
+ * distinct properties projected into outer scope variables that feed into the query key.
+ * When a function accepts `params` and projects several properties (`params?.status`,
+ * `params?.search`, `params?.page`, `params?.limit`) into the query key builder,
+ * passing `params` to `queryFn: () => service.get(params)` is covered.
+ */
+function isCoveredObjectInput(
+  name: string,
+  fnValue: NodePath<t.Function>,
+  derived: Set<string>,
+  references: NodePath<t.Identifier>[],
+): boolean {
+  const binding = fnValue.scope.getBinding(name);
+  if (!binding) return false;
+  if (!derived.has(name)) return false;
+
+  const allRefs = binding.referencePaths;
+  const outerRefs = allRefs.filter(
+    (ref) => !ref.findParent((p) => p === fnValue),
+  );
+
+  const distinctProperties = new Set<string>();
+  for (const ref of outerRefs) {
+    if (!ref.isIdentifier()) return false;
+    const parent = ref.parentPath?.node;
+    if (
+      (t.isMemberExpression(parent) || t.isOptionalMemberExpression(parent)) &&
+      parent.object === ref.node &&
+      t.isIdentifier(parent.property)
+    ) {
+      distinctProperties.add(parent.property.name);
+    } else if (!isProjectionUse(ref)) {
+      return false;
+    }
+  }
+
+  // Require at least 2 distinct properties projected into the key to avoid false clean
+  // on a single field extraction where other fields are left unkeyed.
+  if (distinctProperties.size < 2) return false;
+
+  return references.every((ref) => {
+    const parent = ref.parentPath?.node;
+    return (
+      (t.isCallExpression(parent) && parent.arguments.includes(ref.node)) ||
+      isProjectionUse(ref)
+    );
+  });
+}
+
+/**
  * True when a use of an identifier only projects it: a normal or optional
  * member read off the identifier, or a null guard (`!v`, `v === null`,
  * `v ?? fallback`, `Boolean(v)`). Projected member values are already shaped
@@ -154,6 +204,18 @@ export const QueryKeyCompletenessRule: VerificationRule = {
         const fnValue = fnPath.get("value");
         if (!fnValue.isFunction()) return;
         const keyed = referencedNames(keyValue);
+        if (keyValue.isIdentifier()) {
+          const binding = keyValue.scope.getBinding(keyValue.node.name);
+          if (
+            binding &&
+            binding.path.isVariableDeclarator() &&
+            binding.path.node.init
+          ) {
+            for (const name of referencedNames(binding.path.get("init"))) {
+              keyed.add(name);
+            }
+          }
+        }
         const missing = new Set<string>();
         const references = new Map<string, NodePath<t.Identifier>[]>();
         fnValue.traverse({
@@ -201,11 +263,13 @@ export const QueryKeyCompletenessRule: VerificationRule = {
         // `offlineDetails`, while queryFn reads `offlineDetails.database`
         // behind `if (!offlineDetails) throw`.
         const derived = derivedNamesFor(keyed, keyValue);
-        const uncovered = [...missing].filter(
-          (name) =>
-            !derived.has(name) ||
-            !(references.get(name) ?? []).every((ref) => isProjectionUse(ref)),
-        );
+        const uncovered = [...missing].filter((name) => {
+          if (!derived.has(name)) return true;
+          const refs = references.get(name) ?? [];
+          if (refs.every((ref) => isProjectionUse(ref))) return false;
+          if (isCoveredObjectInput(name, fnValue, derived, refs)) return false;
+          return true;
+        });
         if (uncovered.length === 0) return;
         const names = uncovered.sort().slice(0, 5);
         report(
@@ -851,7 +915,8 @@ export const AvailableSchemaNotAppliedRule: VerificationRule = {
           if (
             (t.isImportSpecifier(specifier) ||
               t.isImportDefaultSpecifier(specifier)) &&
-            /Schema$/.test(specifier.local.name)
+            /Schema$/.test(specifier.local.name) &&
+            !/^(?:create|make|build|get)[A-Z]/.test(specifier.local.name)
           )
             schemas.add(specifier.local.name);
       }
@@ -898,7 +963,7 @@ export const AvailableSchemaNotAppliedRule: VerificationRule = {
         if (
           [...schemas].some((schema) =>
             new RegExp(
-              `\\b${schema}\\s*\\.\\s*(?:parse|safeParse)\\s*\\(`,
+              `\\b${schema}\\s*\\.\\s*(?:parse|safeParse)\\s*\\(|(?:responseSchema|schema)\\s*:\\s*${schema}\\b`,
             ).test(text),
           )
         )
