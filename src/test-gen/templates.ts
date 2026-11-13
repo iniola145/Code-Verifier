@@ -1,4 +1,5 @@
 import * as path from "path";
+import { detectDomEnvironment } from "./detect-framework";
 import { TestCase, TestFramework } from "./types";
 
 export interface TemplateOptions {
@@ -181,15 +182,27 @@ export function generateTestFile(
   const rawImports = testCases.flatMap((tc) => tc.imports);
   const allImports = mergeImports(rawImports);
 
-  // Framework runner imports (e.g. Vitest needs explicit describe, it, expect, vi, beforeEach)
+  // Framework runner imports (e.g. Vitest needs explicit describe, it, expect, vi, beforeEach, afterEach)
   const runnerImports: string[] = [];
   if (framework === "vitest") {
+    const hasVi =
+      testCases.some((tc) => /\bvi\b/.test(tc.body)) ||
+      testCases.some((tc) => tc.mocks.some((m) => /\bvi\b/.test(m.factory)));
     const hasBeforeEach = testCases.some((tc) =>
       tc.body.includes("beforeEach("),
     );
-    const vitestFns = ["describe", "it", "expect", "vi"];
+    const hasAfterEach = testCases.some((tc) =>
+      tc.body.includes("afterEach("),
+    );
+    const vitestFns = ["describe", "it", "expect"];
+    if (hasVi) {
+      vitestFns.push("vi");
+    }
     if (hasBeforeEach) {
       vitestFns.push("beforeEach");
+    }
+    if (hasAfterEach) {
+      vitestFns.push("afterEach");
     }
     runnerImports.push(`import { ${vitestFns.join(", ")} } from 'vitest';`);
   }
@@ -236,7 +249,8 @@ export function generateTestFile(
   );
 
   if (framework === "vitest" && usesReactDomRender) {
-    parts.push("/** @vitest-environment happy-dom */");
+    const domEnv = detectDomEnvironment(sourceFile);
+    parts.push(`/** @vitest-environment ${domEnv.preferredDomEnv} */`);
   }
 
   parts.push(header);

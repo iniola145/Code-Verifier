@@ -1,6 +1,7 @@
 export * from "./types";
 export * from "./mock-synthesizer";
 export * from "./strategies";
+export * from "./unit-strategies";
 export * from "./templates";
 export * from "./generator";
 export * from "./frameworks/jest";

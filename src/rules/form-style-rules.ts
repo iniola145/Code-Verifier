@@ -414,6 +414,8 @@ export const UndefinedStyleNameRule: VerificationRule = {
     traverse(ctx.ast, {
       MemberExpression(path) {
         if (!t.isIdentifier(path.node.object)) return;
+        const binding = path.scope.getBinding(path.node.object.name);
+        if (binding && binding.scope.block.type !== "Program") return;
         const fact = facts.get(path.node.object.name);
         if (!fact) return;
         const key =

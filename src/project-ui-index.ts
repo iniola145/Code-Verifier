@@ -331,6 +331,8 @@ export class ProjectUiIndex {
       traverse(module.ast, {
         MemberExpression(path) {
           if (!t.isIdentifier(path.node.object)) return;
+          const binding = path.scope.getBinding(path.node.object.name);
+          if (binding && binding.scope.block.type !== "Program") return;
           const fact = available.get(path.node.object.name);
           if (!fact) return;
           const key =

@@ -6,10 +6,12 @@ import { CodeVerifier } from "../engine";
 import { parseSourceCode } from "../parser/ast";
 import {
   detectFramework,
+  findProjectRoot,
   isReactNativeProject,
   detectDomEnvironment,
 } from "./detect-framework";
 import { generateMockCode, synthesizeMocks } from "./mock-synthesizer";
+import { isHttpClientWrapper } from "./unit-strategies";
 import { TestFramework } from "./types";
 
 export interface MethodContract {
@@ -59,7 +61,7 @@ export async function getTestContextForFile(
       ? codeOverride
       : fs.readFileSync(resolvedPath, "utf-8");
 
-  const projectRoot = path.dirname(resolvedPath);
+  const projectRoot = findProjectRoot(path.dirname(resolvedPath));
   const framework = detectFramework(projectRoot);
   const { ast } = parseSourceCode(code, resolvedPath);
 
@@ -101,15 +103,32 @@ export async function getTestContextForFile(
         const callee = cPath.node.callee;
         if (
           t.isMemberExpression(callee) &&
+          t.isIdentifier(callee.object) &&
           t.isIdentifier(callee.property) &&
           ["get", "post", "put", "delete", "patch"].includes(callee.property.name)
         ) {
-          httpMethod = callee.property.name.toUpperCase();
+          const objName = callee.object.name;
+          const isCollectionOrDom =
+            /^(map|set|headers|requestHeaders|responseHeaders|params|searchParams|urlSearchParams|cookies|cache|store|storage|formData|reflect|weakMap|weakSet|listeners|.*Listeners|.*Map|.*Set|.*Cache|.*Headers|localStorage|sessionStorage|document|window|console)$/i.test(
+              objName,
+            );
           const firstArg = cPath.node.arguments[0];
-          if (t.isStringLiteral(firstArg)) {
-            apiEndpoint = firstArg.value;
-          } else if (t.isTemplateLiteral(firstArg) && firstArg.quasis[0]) {
-            apiEndpoint = firstArg.quasis.map((q: any) => q.value.raw).join("${...}");
+          const rawEndpoint = t.isStringLiteral(firstArg)
+            ? firstArg.value
+            : t.isTemplateLiteral(firstArg) && firstArg.quasis[0]
+              ? firstArg.quasis.map((q: any) => q.value.raw).join("${...}")
+              : undefined;
+          const isClient =
+            /^(api|apiClient|httpClient|client|axios|http|ky|rest|serviceClient|request)$/i.test(
+              objName,
+            ) ||
+            Boolean(
+              rawEndpoint &&
+                (rawEndpoint.startsWith("/") || /^https?:\/\//i.test(rawEndpoint)),
+            );
+          if (!isCollectionOrDom && isClient) {
+            httpMethod = callee.property.name.toUpperCase();
+            apiEndpoint = rawEndpoint;
           }
         } else if (t.isIdentifier(callee) && /^(apiRequest|request|fetchApi|queryApi|fetch)$/i.test(callee.name)) {
           httpMethod = "FETCH";
@@ -226,6 +245,19 @@ export async function getTestContextForFile(
           kind: "function",
           methods: [analyzeMethodNode(decl, symName)],
         });
+      } else if (t.isClassDeclaration(decl) && decl.id) {
+        const methods: MethodContract[] = [];
+        for (const item of decl.body.body) {
+          if (t.isClassMethod(item) && t.isIdentifier(item.key)) {
+            methods.push(analyzeMethodNode(item, item.key.name));
+          }
+        }
+        exportsList.push({
+          name: decl.id.name,
+          isDefault: false,
+          kind: "class",
+          methods,
+        });
       }
     },
     ExportDefaultDeclaration(path: any) {
@@ -266,7 +298,7 @@ export async function getTestContextForFile(
     moduleClassification = "component";
   } else if (isHook) {
     moduleClassification = "hook";
-  } else if (hasAxiosCreate) {
+  } else if (hasAxiosCreate || isHttpClientWrapper(ast, resolvedPath)) {
     moduleClassification = "client";
   } else if (
     exportsList.some((e) => e.methods.some((m) => Boolean(m.apiEndpoint) || Boolean(m.httpMethod))) ||

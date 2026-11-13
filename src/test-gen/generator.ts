@@ -21,8 +21,20 @@ import {
   TestFramework,
   TestGenOptions,
 } from "./types";
-import { detectFramework, isReactNativeProject } from "./detect-framework";
-export { detectFramework, isReactNativeProject };
+import {
+  detectFramework,
+  findProjectRoot,
+  isReactNativeProject,
+} from "./detect-framework";
+import {
+  generateComponentModuleTests,
+  generateHookModuleTests,
+  generateHttpClientWrapperTests,
+  generateUtilityModuleTests,
+  isCustomHookModule,
+  isHttpClientWrapper,
+} from "./unit-strategies";
+export { detectFramework, findProjectRoot, isReactNativeProject };
 
 /**
  * Generate tests for a single file.
@@ -45,7 +57,9 @@ export async function generateTestsForFile(
   const { ast } = parseSourceCode(code, resolvedPath);
 
   // 2. Framework detection
-  const projectRoot = options?.projectRoot || path.dirname(resolvedPath);
+  const projectRoot = findProjectRoot(
+    options?.projectRoot || path.dirname(resolvedPath),
+  );
   const framework = options?.framework || detectFramework(projectRoot);
 
   // 3. UI Index, Summary Index & Verifier execution (reusing shared instances if available)
@@ -130,22 +144,39 @@ export async function generateTestsForFile(
   });
 
   const isComponent = hasJsx || contracts.length > 0;
+  const fileExports = getFileExports(ast);
 
-  // If no specific finding triggered a strategy or file is clean, check for service modules
-  // ONLY if the file is NOT a component
-  if (testCases.length === 0 && !isComponent) {
-    const serviceTests = generateServiceModuleTests(context);
-    if (serviceTests.length > 0) {
-      testCases.push(...serviceTests);
+  // Specialized archetype dispatch when no finding-specific strategy already produced tests
+  if (testCases.length === 0) {
+    if (isHttpClientWrapper(ast, resolvedPath)) {
+      const clientTests = generateHttpClientWrapperTests(context);
+      if (clientTests.length > 0) {
+        testCases.push(...clientTests);
+      }
+    } else if (!isComponent && isCustomHookModule(ast, fileExports)) {
+      const hookTests = generateHookModuleTests(context);
+      if (hookTests.length > 0) {
+        testCases.push(...hookTests);
+      }
+    } else if (!isComponent) {
+      const serviceTests = generateServiceModuleTests(context);
+      if (serviceTests.length > 0) {
+        testCases.push(...serviceTests);
+      } else {
+        const utilityTests = generateUtilityModuleTests(context);
+        if (utilityTests.length > 0) {
+          testCases.push(...utilityTests);
+        }
+      }
     }
   }
 
-  // If still no test cases, generate a baseline test
+  // If still no test cases, generate component or baseline test
   if (testCases.length === 0) {
     const baseName = path.basename(resolvedPath).replace(/\.(tsx?|jsx?)$/, "");
-    const fileExports = getFileExports(ast);
     const caller =
       fileExports.defaultExportName ||
+      [...fileExports.namedExports].find((n) => /^[A-Z]/.test(n)) ||
       (fileExports.namedExports.values().next().value || baseName);
     const isDefault =
       fileExports.defaultExportName === caller ||
@@ -157,7 +188,6 @@ export async function generateTestsForFile(
       fileExports,
     );
 
-    const isNative = isReactNativeProject(options?.projectRoot, code);
     // A component must start with an uppercase letter or have component contracts
     const isExportedComponent =
       isComponent &&
@@ -166,27 +196,8 @@ export async function generateTestsForFile(
       !/^(routes?|paths?|config|schema)$/i.test(caller);
 
     if (isExportedComponent) {
-      const renderAssertion = isNative
-        ? `const { toJSON } = render(<${caller} />);\n    expect(toJSON()).toBeDefined();`
-        : `const { container } = render(<${caller} />);\n    expect(container).toBeDefined();`;
-
-      testCases.push({
-        id: `baseline-${baseName}`,
-        description: `should render ${caller} without crashing`,
-        framework,
-        body: `  it('renders ${caller} without crashing', () => {\n    ${renderAssertion}\n  });`,
-        imports: [
-          `import React from 'react';`,
-          isNative
-            ? `import { render } from '@testing-library/react-native';`
-            : `import { render } from '@testing-library/react';`,
-          sourceImport,
-        ],
-        mocks,
-        sourceFile: resolvedPath,
-        coversRules: [],
-        confidence: 1.0,
-      });
+      const compTests = generateComponentModuleTests(context);
+      testCases.push(...compTests);
     } else {
       testCases.push({
         id: `baseline-${baseName}`,

@@ -58,7 +58,7 @@ export function getFileExports(ast: any): FileExports {
   traverse(ast, {
     ExportDefaultDeclaration(path: any) {
       const decl = path.node.declaration;
-      if (t.isFunctionDeclaration(decl) && decl.id) {
+      if ((t.isFunctionDeclaration(decl) || t.isClassDeclaration(decl)) && decl.id) {
         defaultExportName = decl.id.name;
       } else if (t.isIdentifier(decl)) {
         defaultExportName = decl.name;
@@ -68,7 +68,7 @@ export function getFileExports(ast: any): FileExports {
     },
     ExportNamedDeclaration(path: any) {
       const decl = path.node.declaration;
-      if (t.isFunctionDeclaration(decl) && decl.id) {
+      if ((t.isFunctionDeclaration(decl) || t.isClassDeclaration(decl)) && decl.id) {
         namedExports.add(decl.id.name);
       } else if (t.isVariableDeclaration(decl)) {
         for (const item of decl.declarations) {
@@ -434,6 +434,7 @@ function generateDefaultPropValue(
   fact?: ComponentPropFact,
   framework: TestFramework = "jest",
   typeKind?: string,
+  isNative = true,
 ): string {
   const fnKeyword = framework === "jest" ? "jest.fn()" : "vi.fn()";
 
@@ -473,7 +474,7 @@ function generateDefaultPropValue(
   if (lower === "navigation")
     return `{ navigate: ${fnKeyword}, goBack: ${fnKeyword} }`;
   if (lower === "style") return `{}`;
-  if (lower === "children") return `<Text>Test Child</Text>`;
+  if (lower === "children") return isNative ? `<Text>Test Child</Text>` : `<div>Test Child</div>`;
 
   return `'test-${propName}'`;
 }
@@ -481,13 +482,14 @@ function generateDefaultPropValue(
 /**
  * Resolve required props string for a component using contracts, AST, and invariants.
  */
-function getRequiredPropsString(
+export function getRequiredPropsString(
   componentName: string,
   context: StrategyContext,
   finding?: Diagnostic,
   excludeProps: string[] = [],
 ): string {
   const { framework, contracts, ast } = context;
+  const isNative = isReactNativeProject(context.projectRoot, context.code);
   const pairs: string[] = [];
   const handled = new Set<string>(excludeProps);
 
@@ -502,7 +504,7 @@ function getRequiredPropsString(
       for (const [propName, fact] of contract.props.entries()) {
         if (fact.required) {
           handled.add(propName);
-          const val = generateDefaultPropValue(propName, fact, framework);
+          const val = generateDefaultPropValue(propName, fact, framework, undefined, isNative);
           pairs.push(`${propName}={${val}}`);
         }
       }
@@ -518,7 +520,7 @@ function getRequiredPropsString(
     for (const p of propNames) {
       if (!handled.has(p)) {
         handled.add(p);
-        const val = generateDefaultPropValue(p, undefined, framework);
+        const val = generateDefaultPropValue(p, undefined, framework, undefined, isNative);
         pairs.push(`${p}={${val}}`);
       }
     }
@@ -535,6 +537,7 @@ function getRequiredPropsString(
           undefined,
           framework,
           prop.typeKind,
+          isNative,
         );
         pairs.push(`${prop.name}={${val}}`);
       }
@@ -1367,31 +1370,54 @@ export function generateServiceModuleTests(context: StrategyContext): TestCase[]
           const objName = callee.object.name;
           const propName = callee.property.name;
           if (["get", "post", "put", "delete", "patch"].includes(propName)) {
+            const isLocalCollectionOrDom =
+              /^(map|set|headers|requestHeaders|responseHeaders|params|searchParams|urlSearchParams|cookies|cache|store|storage|formData|reflect|weakMap|weakSet|listeners|.*Listeners|.*Map|.*Set|.*Cache|.*Headers|localStorage|sessionStorage|document|window|console|Math|JSON|Object|Array|Promise)$/i.test(
+                objName,
+              );
             const firstArg = cPath.node.arguments[0];
             const endpoint = t.isStringLiteral(firstArg)
               ? firstArg.value
               : t.isTemplateLiteral(firstArg) && firstArg.quasis[0]
                 ? firstArg.quasis[0].value.raw
                 : undefined;
-            const hasPayload = cPath.node.arguments.length > 1;
-            const secondArg = cPath.node.arguments[1];
-            const payloadArgName = t.isIdentifier(secondArg)
-              ? secondArg.name
-              : undefined;
-            info.apiCalls.push({
-              client: objName,
-              method: propName,
-              endpoint,
-              hasPayload,
-              payloadArgName,
-            });
+            const isHttpClientObj =
+              /^(api|apiClient|httpClient|client|axios|http|ky|rest|serviceClient|request)$/i.test(
+                objName,
+              ) ||
+              Boolean(
+                endpoint &&
+                  (endpoint.startsWith("/") || /^https?:\/\//i.test(endpoint)),
+              );
+
+            if (!isLocalCollectionOrDom && isHttpClientObj) {
+              const hasPayload = cPath.node.arguments.length > 1;
+              const secondArg = cPath.node.arguments[1];
+              const payloadArgName = t.isIdentifier(secondArg)
+                ? secondArg.name
+                : undefined;
+              info.apiCalls.push({
+                client: objName,
+                method: propName,
+                endpoint,
+                hasPayload,
+                payloadArgName,
+              });
+            }
           }
           if (objName === "console" && propName === "error") {
             info.catchLogsError = true;
           }
         } else if (t.isIdentifier(callee)) {
           // Direct function-call HTTP wrappers (e.g. apiRequest, request, fetch)
-          if (/^(apiRequest|request|http|fetch)$/i.test(callee.name)) {
+          // Only treat as a domain service call if this function is not itself the HTTP wrapper definition
+          const isWrapperSelf =
+            /^(apiRequest|request|fetchClient|httpClient|apiFetch|fetchWithAuth)$/i.test(
+              methodName,
+            );
+          if (
+            !isWrapperSelf &&
+            /^(apiRequest|request|http|fetch)$/i.test(callee.name)
+          ) {
             const firstArg = cPath.node.arguments[0];
             const endpoint = t.isStringLiteral(firstArg)
               ? firstArg.value
@@ -1627,6 +1653,9 @@ export function generateServiceModuleTests(context: StrategyContext): TestCase[]
     const mockSetup = isDirectFunction
       ? `${mockedFn}.mockResolvedValueOnce`
       : `${client}.${method}.mockResolvedValueOnce`;
+    const mockRejectSetup = isDirectFunction
+      ? `${mockedFn}.mockRejectedValueOnce`
+      : `${client}.${method}.mockRejectedValueOnce`;
     const clientCaller = isDirectFunction ? client : `${client}.${method}`;
 
     // 1. Success test
@@ -1738,7 +1767,7 @@ export function generateServiceModuleTests(context: StrategyContext): TestCase[]
           id: `service-${m.methodName}-server-error`,
           description: `should throw server error message when ${m.methodName} fails`,
           framework,
-          body: `  it('should throw server error message when ${m.methodName} fails', async () => {\n    const serverError = {\n      response: {\n        data: { message: 'Server reported failure' },\n      },\n    };\n    ${client}.${method}.mockRejectedValueOnce(serverError);\n\n    await expect(${caller}(${paramCall})).rejects.toThrow('Server reported failure');\n  });`,
+          body: `  it('should throw server error message when ${m.methodName} fails', async () => {\n    const serverError = {\n      response: {\n        data: { message: 'Server reported failure' },\n      },\n    };\n    ${mockRejectSetup}(serverError);\n\n    await expect(${caller}(${paramCall})).rejects.toThrow('Server reported failure');\n  });`,
           imports: allImports,
           mocks: [],
           sourceFile,
@@ -1750,7 +1779,7 @@ export function generateServiceModuleTests(context: StrategyContext): TestCase[]
           id: `service-${m.methodName}-fallback-error`,
           description: `should throw fallback error when ${m.methodName} fails without server message`,
           framework,
-          body: `  it('should throw fallback error when ${m.methodName} fails without server message', async () => {\n    ${client}.${method}.mockRejectedValueOnce(new Error('Network error'));\n\n    await expect(${caller}(${paramCall})).rejects.toThrow('${m.catchFallbackMessage}');\n  });`,
+          body: `  it('should throw fallback error when ${m.methodName} fails without server message', async () => {\n    ${mockRejectSetup}(new Error('Network error'));\n\n    await expect(${caller}(${paramCall})).rejects.toThrow('${m.catchFallbackMessage}');\n  });`,
           imports: allImports,
           mocks: [],
           sourceFile,
@@ -1763,7 +1792,7 @@ export function generateServiceModuleTests(context: StrategyContext): TestCase[]
           id: `service-${m.methodName}-error`,
           description: `should throw error when ${m.methodName} fails`,
           framework,
-          body: `  it('should throw "${errorMsg}" when ${m.methodName} fails', async () => {\n    ${client}.${method}.mockRejectedValueOnce(new Error('API failure'));\n\n    await expect(${caller}(${paramCall})).rejects.toThrow('${errorMsg}');\n  });`,
+          body: `  it('should throw "${errorMsg}" when ${m.methodName} fails', async () => {\n    ${mockRejectSetup}(new Error('API failure'));\n\n    await expect(${caller}(${paramCall})).rejects.toThrow('${errorMsg}');\n  });`,
           imports: allImports,
           mocks: [],
           sourceFile,
@@ -1776,7 +1805,7 @@ export function generateServiceModuleTests(context: StrategyContext): TestCase[]
         id: `service-${m.methodName}-log-error`,
         description: `should log to console.error and still return gracefully when ${m.methodName} fails`,
         framework,
-        body: `  it('should log to console.error and still return gracefully when ${m.methodName} fails', async () => {\n    const consoleSpy = ${spyKeyword}(console, 'error').mockImplementation(() => {});\n    ${client}.${method}.mockRejectedValueOnce(new Error('Network failure'));\n\n    const result = await ${caller}();\n\n    expect(consoleSpy).toHaveBeenCalled();\n    expect(result).toBe(true);\n    consoleSpy.mockRestore();\n  });`,
+        body: `  it('should log to console.error and still return gracefully when ${m.methodName} fails', async () => {\n    const consoleSpy = ${spyKeyword}(console, 'error').mockImplementation(() => {});\n    ${mockRejectSetup}(new Error('Network failure'));\n\n    const result = await ${caller}();\n\n    expect(consoleSpy).toHaveBeenCalled();\n    expect(result).toBe(true);\n    consoleSpy.mockRestore();\n  });`,
         imports: allImports,
         mocks: [],
         sourceFile,

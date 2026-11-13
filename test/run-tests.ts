@@ -4178,6 +4178,98 @@ async function runTests() {
         reExportMockCode.includes("Badge: jest.fn()"),
       "Mock synthesizer captures export ... from re-exports",
     );
+
+    // 10. HTTP client wrapper test generation (no fetch.get or hardcoded password payload)
+    const httpClientCode = `
+      import { z } from 'zod';
+      import { ApiError } from '@/api/apiError';
+      import { buildEndpoint, REFRESH_TIMEOUT_MS } from '@/api/clientHelpers';
+      export async function apiRequest<T = unknown>(endpoint: string, options: any = {}): Promise<T> {
+        const url = buildEndpoint(endpoint, options.params);
+        const response = await fetch(url, { credentials: 'include' });
+        if (response.status === 401) {
+          const refresh = await fetch('/api/v1/auth/refresh', { method: 'POST', signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS) });
+          if (!refresh.ok) throw new ApiError(401, 'Session expired. Please sign in again.');
+          return apiRequest(endpoint, options);
+        }
+        if (response.status === 204) return undefined as T;
+        const data = await response.json();
+        if (!response.ok) throw ApiError.fromPayload(response.status, data);
+        return data;
+      }
+    `;
+    const httpClientGen = await generateTestsForFile(
+      "src/api/client.ts",
+      { framework: "vitest", mode: "directory" },
+      httpClientCode,
+    );
+    assert(
+      !httpClientGen.content.includes("fetch.get") &&
+        !httpClientGen.content.includes("newPassword!") &&
+        !httpClientGen.content.includes("vi.mock('zod'") &&
+        httpClientGen.content.includes("REFRESH_TIMEOUT_MS: 1000") &&
+        httpClientGen.content.includes("new Response(") &&
+        httpClientGen.testCases.length >= 5,
+      "generateTestsForFile generates realistic Response-based tests for HTTP fetch client wrapper without fetch.get or zod empty mock",
+    );
+
+    // 11. Set.delete / Map.get disambiguation (not misclassified as HTTP service)
+    const pubSubCode = `
+      const authExpiryListeners = new Set<() => void>();
+      export function subscribeAuthExpiry(listener: () => void): () => void {
+        authExpiryListeners.add(listener);
+        return () => { authExpiryListeners.delete(listener); };
+      }
+      export function notifyAuthExpiry(): void {
+        for (const l of authExpiryListeners) l();
+      }
+      export function clearAuthExpiryListeners(): void {
+        authExpiryListeners.clear();
+      }
+    `;
+    const pubSubGen = await generateTestsForFile(
+      "src/api/sessionSecurity.ts",
+      { framework: "vitest", mode: "directory" },
+      pubSubCode,
+    );
+    assert(
+      !pubSubGen.content.includes("authExpiryListeners.delete.mockResolvedValueOnce") &&
+        pubSubGen.content.includes("subscribeAuthExpiry") &&
+        pubSubGen.content.includes("notifyAuthExpiry"),
+      "generateTestsForFile does not confuse Set.delete with an HTTP client DELETE method and generates pub/sub tests",
+    );
+
+    // 12. Exported Error subclass test generation
+    const errorClassCode = `
+      export class ApiError extends Error {
+        readonly status: number;
+        readonly code: string;
+        readonly details?: unknown;
+        constructor(status: number, message: string, code = 'API_ERROR', details?: unknown) {
+          super(message);
+          this.status = status;
+          this.code = code;
+          this.details = details;
+        }
+        static isApiError(err: unknown): err is ApiError {
+          return err instanceof ApiError;
+        }
+        static fromPayload(status: number, payload: any, fallback?: string): ApiError {
+          return new ApiError(status, payload?.message || fallback || 'Error');
+        }
+      }
+    `;
+    const errorClassGen = await generateTestsForFile(
+      "src/api/apiError.ts",
+      { framework: "vitest", mode: "directory" },
+      errorClassCode,
+    );
+    assert(
+      errorClassGen.content.includes("import { ApiError } from './apiError'") &&
+        errorClassGen.content.includes("ApiError.isApiError") &&
+        errorClassGen.content.includes("ApiError.fromPayload"),
+      "generateTestsForFile extracts exported class declarations and generates constructor and static method tests",
+    );
   }
 
   // =========================================================================

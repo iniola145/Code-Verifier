@@ -916,7 +916,7 @@ export const AvailableSchemaNotAppliedRule: VerificationRule = {
             (t.isImportSpecifier(specifier) ||
               t.isImportDefaultSpecifier(specifier)) &&
             /Schema$/.test(specifier.local.name) &&
-            !/^(?:create|make|build|get)[A-Z]/.test(specifier.local.name)
+            !/^(?:create|make|build|get)Api[A-Z]/.test(specifier.local.name)
           )
             schemas.add(specifier.local.name);
       }
