@@ -1151,6 +1151,16 @@ async function runTests() {
     "REL-001",
     "Catch delegated to an explicit mutation error handler is clean",
   );
+  {
+    const testCatchResult = await verifier.verifyCode(
+      `try { await mutate(); } catch { // expected error from mutation\n}`,
+      "src/hooks/useThing.test.ts",
+    );
+    assert(
+      !testCatchResult.diagnostics.some((d) => d.ruleId === "REL-001"),
+      "Commented expected-error catch in test file is clean",
+    );
+  }
   await expectFinding(
     `function value() { try { return compute(); } finally { return fallback; } }`,
     "REL-002",
@@ -2409,6 +2419,31 @@ async function runTests() {
     "QUERY-004",
     "Awaited mutation invalidation is clean",
   );
+  await expectNoFinding(
+    `function useSave() { return useMutation({ mutationFn: save, onSuccess() { void queryClient.invalidateQueries({ queryKey: ['items'] }); onClose(); } }); }`,
+    "QUERY-004",
+    "Explicitly voided fire-and-forget mutation invalidation is clean",
+  );
+  await expectNoFinding(
+    `function extract(text: string) {
+      const re = /@(\\w+)/g;
+      let match: RegExpExecArray | null;
+      while ((match = re.exec(text)) !== null) {
+        const token = match[1];
+        if (token) console.log(token);
+      }
+    }`,
+    "AI-NULL-001",
+    "Assignment inside while !== null condition narrows assigned variable to non-null",
+  );
+  await expectNoFinding(
+    `function initials(name?: string | null): string {
+      if (!name?.trim()) return '?';
+      return name.trim().toUpperCase();
+    }`,
+    "AI-NULL-001",
+    "Optional call guard (!name?.trim()) narrows base identifier on fallthrough",
+  );
   await expectFinding(
     `async function load() { setLoading(true); const result = await api.get('/items'); setItems(result.data); setLoading(false); }`,
     "STATE-001",
@@ -2569,6 +2604,51 @@ async function runTests() {
       ),
       "Programmatic querySelector reference counts as CSS usage",
     );
+    {
+      const viteRoot = fs.mkdtempSync(
+        path.join(os.tmpdir(), "code-verifier-vite-css-"),
+      );
+      fs.writeFileSync(
+        path.join(viteRoot, "tsconfig.json"),
+        JSON.stringify({ files: [], references: [{ path: "./tsconfig.app.json" }] }),
+      );
+      fs.writeFileSync(
+        path.join(viteRoot, "tsconfig.app.json"),
+        JSON.stringify({
+          compilerOptions: { paths: { "@/*": ["./src/*"] } },
+        }),
+      );
+      fs.mkdirSync(path.join(viteRoot, "src/styles"), { recursive: true });
+      fs.writeFileSync(
+        path.join(viteRoot, "src/styles/base.css"),
+        `.theme-card { padding: 8px; }`,
+      );
+      fs.writeFileSync(
+        path.join(viteRoot, "src/styles/index.css"),
+        `@import './base.css';`,
+      );
+      const compFile = path.join(viteRoot, "src/App.tsx");
+      fs.writeFileSync(
+        compFile,
+        `import '@/styles/index.css';
+        export function App() {
+          const root = document.documentElement;
+          root.classList.add('light');
+          root.classList.remove('light');
+          return <div className="theme-card" />;
+        }`,
+      );
+      const viteUiIndex = ProjectUiIndex.fromFiles([compFile]);
+      const viteVerifier = new CodeVerifier({
+        projectRoot: viteRoot,
+        projectUiIndex: viteUiIndex,
+      });
+      const viteResult = await viteVerifier.verifyFile(compFile);
+      assert(
+        !viteResult.diagnostics.some((d) => d.ruleId === "STYLE-001"),
+        "Referenced tsconfig paths, CSS @import, and root classList theme toggles do not trigger STYLE-001",
+      );
+    }
 
     const badConsumer = await projectVerifier.verifyFile(
       path.join(fixtureRoot, "BadComponentConsumer.tsx"),

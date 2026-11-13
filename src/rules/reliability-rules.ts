@@ -40,8 +40,13 @@ export const EmptyCatchRule: VerificationRule = {
         const start = path.node.body.loc?.start.line ?? 1;
         const end = path.node.body.loc?.end.line ?? start;
         const bodyText = ctx.lines.slice(start - 1, end).join("\n");
+        const isTestFile = /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(ctx.filePath);
+        const hasComment =
+          (path.node.body.innerComments?.length ?? 0) > 0 ||
+          /\/\/|\/\*/.test(bodyText);
+        if (isTestFile && hasComment) return;
         if (
-          /\b(?:ignore(?:d)?|intentional(?:ly)?|best[- ]effort|graceful fallback|optional|handled by)\b/i.test(
+          /\b(?:ignore(?:d)?|intentional(?:ly)?|best[- ]effort|graceful fallback|optional|handled by|expected)\b/i.test(
             bodyText,
           )
         )

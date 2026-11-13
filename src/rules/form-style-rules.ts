@@ -385,6 +385,32 @@ function styleFacts(ctx: RuleContext) {
   return new Map([...local, ...ctx.projectStyleObjects]);
 }
 
+function filterDomClassUsage(node: t.CallExpression, names: string[]): string[] {
+  const callee = node.callee;
+  if (
+    !t.isMemberExpression(callee) ||
+    !t.isIdentifier(callee.property) ||
+    !t.isMemberExpression(callee.object) ||
+    !t.isIdentifier(callee.object.property, { name: "classList" })
+  )
+    return names;
+  const method = callee.property.name;
+  // Removing a class never requires a CSS definition in the bundle.
+  if (method === "remove") return [];
+  if (method === "add" || method === "toggle") {
+    const target = callee.object.object;
+    const isRootTarget =
+      (t.isIdentifier(target) &&
+        /^(?:root|html|body|doc|documentElement)$/i.test(target.name)) ||
+      (t.isMemberExpression(target) &&
+        t.isIdentifier(target.property) &&
+        ["documentElement", "body"].includes(target.property.name));
+    if (isRootTarget)
+      return names.filter((name) => name !== "light" && name !== "dark");
+  }
+  return names;
+}
+
 export const UndefinedStyleNameRule: VerificationRule = {
   id: "STYLE-001",
   name: "Undefined Style Name",
@@ -458,8 +484,9 @@ export const UndefinedStyleNameRule: VerificationRule = {
       CallExpression(path) {
         if (cssClasses.size === 0) return;
         const usage = classesFromDomCall(path.node);
-        if (usage && usage !== "dynamic")
-          reportMissingClasses(path.node, usage);
+        if (!usage || usage === "dynamic") return;
+        const filtered = filterDomClassUsage(path.node, usage);
+        if (filtered.length > 0) reportMissingClasses(path.node, filtered);
       },
       AssignmentExpression(path) {
         if (

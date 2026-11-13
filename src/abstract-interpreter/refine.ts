@@ -45,7 +45,7 @@ function refineExpression(
     }
   }
 
-  // `if (x?.y)` truthy ⇒ the optional chain succeeded ⇒ x is non-null.
+  // `if (x?.y)` / `if (x?.y())` truthy ⇒ the optional chain succeeded ⇒ x is non-null.
   // Falsy proves nothing (the chain short-circuits without throwing).
   if (isMemberLike(expr) && expr.optional) {
     const base = baseIdentifierOf(expr);
@@ -53,9 +53,21 @@ function refineExpression(
     return;
   }
 
-  // `if (x)` truthy => x is non-null; falsy proves nothing (x could be 0 or '')
-  if (t.isIdentifier(expr)) {
-    if (polarity) setNonNull(state, expr, symbols);
+  if (t.isOptionalCallExpression(expr) || t.isCallExpression(expr)) {
+    if (isMemberLike(expr.callee)) {
+      const isOptional =
+        expr.callee.optional ||
+        (t.isOptionalCallExpression(expr) && expr.optional);
+      const base = baseIdentifierOf(expr.callee);
+      if (base && (!isOptional || polarity)) setNonNull(state, base, symbols);
+    }
+    return;
+  }
+
+  // `if (x)` / `if ((x = ...))` truthy => x is non-null; falsy proves nothing
+  const directIdent = assignedOrIdentifier(expr);
+  if (directIdent) {
+    if (polarity) setNonNull(state, directIdent, symbols);
     return;
   }
 
@@ -76,12 +88,8 @@ function refineExpression(
     if (nullishSide) {
       const variable =
         nullishSide === "right"
-          ? t.isIdentifier(expr.left)
-            ? expr.left
-            : null
-          : t.isIdentifier(expr.right)
-            ? expr.right
-            : null;
+          ? assignedOrIdentifier(expr.left)
+          : assignedOrIdentifier(expr.right);
       const undefinedSide = isUndefinedIdentifier(
         nullishSide === "right" ? expr.right : expr.left,
       );
@@ -102,11 +110,8 @@ function refineExpression(
   // `x != null` / `x != undefined` (loose) — true ⇒ non-nullish.
   if (t.isBinaryExpression(expr) && expr.operator === "!=") {
     if (isNullish(expr.right) || isNullish(expr.left)) {
-      const variable = t.isIdentifier(expr.left)
-        ? expr.left
-        : t.isIdentifier(expr.right)
-          ? expr.right
-          : null;
+      const variable =
+        assignedOrIdentifier(expr.left) ?? assignedOrIdentifier(expr.right);
       if (variable) {
         if (polarity) setNonNull(state, variable, symbols);
         else setNullability(state, variable, "Nullable", symbols);
@@ -175,7 +180,7 @@ function refineExpression(
     expr.operator === "==" &&
     isNullish(expr.right)
   ) {
-    const variable = t.isIdentifier(expr.left) ? expr.left : null;
+    const variable = assignedOrIdentifier(expr.left);
     if (variable) {
       if (polarity) setNullability(state, variable, "Nullable", symbols);
       else setNonNull(state, variable, symbols);
@@ -189,7 +194,7 @@ function refineExpression(
     (expr.operator === "===" || expr.operator === "==")
   ) {
     if (t.isNullLiteral(expr.right) || isNullish(expr.right)) {
-      const variable = t.isIdentifier(expr.left) ? expr.left : null;
+      const variable = assignedOrIdentifier(expr.left);
       if (variable) {
         if (polarity)
           setNullability(
@@ -203,11 +208,8 @@ function refineExpression(
       return;
     }
     if (isUndefinedIdentifier(expr.right) || isUndefinedIdentifier(expr.left)) {
-      const variable = t.isIdentifier(expr.left)
-        ? expr.left
-        : t.isIdentifier(expr.right)
-          ? expr.right
-          : null;
+      const variable =
+        assignedOrIdentifier(expr.left) ?? assignedOrIdentifier(expr.right);
       if (variable) {
         if (polarity) setNullability(state, variable, "Undefined", symbols);
         else setNonNull(state, variable, symbols);
@@ -327,6 +329,13 @@ function isMemberLike(
 
 function isNullish(expr: t.Node): boolean {
   return t.isNullLiteral(expr) || isUndefinedIdentifier(expr);
+}
+
+function assignedOrIdentifier(node: t.Node): t.Identifier | null {
+  let cur: t.Node = node;
+  while (t.isParenthesizedExpression(cur)) cur = cur.expression;
+  if (t.isAssignmentExpression(cur) && cur.operator === "=") cur = cur.left;
+  return t.isIdentifier(cur) ? cur : null;
 }
 
 export const NullabilityRefiner = { refineState };

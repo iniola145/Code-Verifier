@@ -1008,6 +1008,7 @@ export const UnawaitedInvalidationRule: VerificationRule = {
         if (
           path.parentPath.isAwaitExpression() ||
           path.parentPath.isReturnStatement() ||
+          path.parentPath.isUnaryExpression({ operator: "void" }) ||
           (callback.isArrowFunctionExpression() &&
             callback.node.body === path.node)
         )

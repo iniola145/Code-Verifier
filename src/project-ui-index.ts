@@ -108,8 +108,20 @@ export class ProjectUiIndex {
 
   cssClassesForFile(filePath: string): Set<string> {
     const direct = this.modules.get(path.resolve(filePath))?.cssImports ?? [];
-    if (direct.length > 0)
-      return new Set(direct.flatMap((fact) => [...fact.classes]));
+    if (direct.length > 0) {
+      const classes = new Set(direct.flatMap((fact) => [...fact.classes]));
+      const hasGlobalCss = direct.some(
+        (fact) => !/\.module\.css$/i.test(fact.filePath),
+      );
+      if (hasGlobalCss && !this.tailwind) {
+        for (const fact of this.css.values()) {
+          if (!/\.module\.css$/i.test(fact.filePath)) {
+            for (const cls of fact.classes) classes.add(cls);
+          }
+        }
+      }
+      return classes;
+    }
     if (this.tailwind) return new Set();
     return new Set([...this.css.values()].flatMap((fact) => [...fact.classes]));
   }
@@ -201,18 +213,16 @@ export class ProjectUiIndex {
           !/\.css$/i.test(statement.source.value)
         )
           continue;
-        const cssPath = path.resolve(
-          path.dirname(filePath),
+        const cssPath = this.resolveCssImport(
+          filePath,
           statement.source.value,
         );
-        if (!fs.existsSync(cssPath)) continue;
+        if (!cssPath) continue;
         let fact = this.css.get(cssPath);
         if (!fact) {
-          const cssText = fs.readFileSync(cssPath, "utf8");
-          this.tailwind ||= /@tailwind|@import\s+["']tailwindcss/.test(cssText);
           fact = {
             filePath: cssPath,
-            classes: extractCssClasses(cssText),
+            classes: this.collectCssClasses(cssPath, new Set()),
             usedClasses: new Set(),
             ownerFile: filePath,
           };
@@ -383,6 +393,52 @@ export class ProjectUiIndex {
     }
   }
 
+  private collectCssClasses(
+    cssPath: string,
+    visited: Set<string>,
+  ): Set<string> {
+    const resolved = path.resolve(cssPath);
+    if (visited.has(resolved) || !fs.existsSync(resolved)) return new Set();
+    visited.add(resolved);
+    const cssText = fs.readFileSync(resolved, "utf8");
+    this.tailwind ||= /@tailwind|@import\s+["']tailwindcss/.test(cssText);
+    const classes = extractCssClasses(cssText);
+    for (const match of cssText.matchAll(
+      /@import\s+(?:url\(\s*)?["']([^"']+\.css)["']\s*\)?/gi,
+    )) {
+      const target = this.resolveCssImport(resolved, match[1]);
+      if (target) {
+        for (const cls of this.collectCssClasses(target, visited))
+          classes.add(cls);
+      }
+    }
+    return classes;
+  }
+
+  private resolveCssImport(fromFile: string, specifier: string): string | null {
+    if (specifier.startsWith(".")) {
+      const candidate = path.resolve(path.dirname(fromFile), specifier);
+      return fs.existsSync(candidate) ? candidate : null;
+    }
+    const config = this.tsConfigs.find((item) =>
+      isInside(fromFile, item.directory),
+    );
+    if (!config) return null;
+    for (const [pattern, targets] of Object.entries(config.paths)) {
+      const wildcard = matchPattern(pattern, specifier);
+      if (wildcard === null) continue;
+      for (const target of targets) {
+        const candidate = path.resolve(
+          config.baseUrl,
+          target.includes("*") ? target.replace("*", wildcard) : target,
+        );
+        if (fs.existsSync(candidate)) return candidate;
+      }
+    }
+    const baseCandidate = path.resolve(config.baseUrl, specifier);
+    return fs.existsSync(baseCandidate) ? baseCandidate : null;
+  }
+
   private resolveImport(fromFile: string, specifier: string): string | null {
     if (specifier.startsWith("."))
       return this.resolveCandidate(
@@ -420,23 +476,45 @@ export class ProjectUiIndex {
 
   private loadTsConfigs(): void {
     const seen = new Set<string>();
+    const visitConfig = (configPath: string, rootDir: string): void => {
+      const resolved = path.resolve(configPath);
+      if (seen.has(resolved)) return;
+      seen.add(resolved);
+      const loaded = ts.readConfigFile(resolved, ts.sys.readFile);
+      if (loaded.error || !loaded.config) return;
+      const directory = path.dirname(resolved);
+      const options = loaded.config.compilerOptions ?? {};
+      if (options.paths || options.baseUrl) {
+        this.tsConfigs.push({
+          directory: rootDir,
+          baseUrl: path.resolve(directory, options.baseUrl ?? "."),
+          paths: options.paths ?? {},
+        });
+      }
+      if (typeof loaded.config.extends === "string") {
+        const ext = loaded.config.extends.endsWith(".json")
+          ? loaded.config.extends
+          : loaded.config.extends + ".json";
+        visitConfig(path.resolve(directory, ext), rootDir);
+      }
+      if (Array.isArray(loaded.config.references)) {
+        for (const ref of loaded.config.references) {
+          if (typeof ref?.path === "string") {
+            const refPath = ref.path.endsWith(".json")
+              ? ref.path
+              : path.join(ref.path, "tsconfig.json");
+            visitConfig(path.resolve(directory, refPath), rootDir);
+          }
+        }
+      }
+    };
     for (const file of this.files) {
       const configPath = ts.findConfigFile(
         path.dirname(file),
         fs.existsSync,
         "tsconfig.json",
       );
-      if (!configPath || seen.has(configPath)) continue;
-      seen.add(configPath);
-      const loaded = ts.readConfigFile(configPath, ts.sys.readFile);
-      if (loaded.error || !loaded.config) continue;
-      const directory = path.dirname(configPath);
-      const options = loaded.config.compilerOptions ?? {};
-      this.tsConfigs.push({
-        directory,
-        baseUrl: path.resolve(directory, options.baseUrl ?? "."),
-        paths: options.paths ?? {},
-      });
+      if (configPath) visitConfig(configPath, path.dirname(configPath));
     }
     this.tsConfigs.sort((a, b) => b.directory.length - a.directory.length);
   }
