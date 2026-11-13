@@ -2709,6 +2709,11 @@ async function runTests() {
     "Nested terminal-error callback is not mistaken for silent form validation",
   );
   await expectNoFinding(
+    `function useCheckoutForm() { const isSubmittingRef = useRef(false); const submitOrder = () => { if (isSubmittingRef.current || isSubmitting || items.length === 0) return; submit(); }; return { submitOrder }; }`,
+    "FORM-003",
+    "In-flight re-entrancy guard with empty-collection check is not flagged as silent form validation",
+  );
+  await expectNoFinding(
     `interface Props { onSave: (value: string) => void; onClose: () => void; } function Form({ onSave, onClose }: Props) { const handleSave = () => { onSave('ok'); onClose(); }; return <button onClick={handleSave}>Save</button>; }`,
     "FORM-005",
     "Explicitly synchronous submit callback can safely close immediately",

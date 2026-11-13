@@ -228,6 +228,14 @@ export const SilentFormFailureRule: VerificationRule = {
               !/(?:trim|length|safeParse|isValid|errors?|required)/i.test(test)
             )
               return;
+            // Re-entrancy / in-flight submission guards (e.g. `if (isSubmittingRef.current || isSubmitting || items.length === 0) return;`)
+            // prevent duplicate submits or empty-state calls rather than silently failing field validation.
+            if (
+              /\b(?:isSubmitting(?:Ref)?|submitting|isLoading|isPending|isMutating|inFlight)\b/i.test(
+                test,
+              )
+            )
+              return;
             const identifiers = new Set<string>();
             inner.get("test").traverse({
               Identifier(identifier) {
