@@ -286,6 +286,14 @@ export const QueryKeyCompletenessRule: VerificationRule = {
 };
 
 function isApiBoundary(filePath: string): boolean {
+  if (
+    /(?:^|[\\/])(?:__tests__|__mocks__|tests?|e2e|fixtures?)(?:[\\/]|$)/i.test(
+      filePath,
+    ) ||
+    /\.(?:test|spec|e2e|stories)\.[cm]?[jt]sx?$/i.test(filePath)
+  ) {
+    return false;
+  }
   return (
     /(?:^|[\\/])(?:api|services?|clients?)(?:[\\/]|\.|$)/i.test(filePath) ||
     /(?:api|service|client|upload)[^\\/]*\.[cm]?[jt]sx?$/i.test(filePath)

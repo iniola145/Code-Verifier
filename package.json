@@ -1,6 +1,6 @@
 {
   "name": "code-verifier",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Static Application Security Testing (SAST) and Abstract Interpretation engine for React, React Native, Expo, and TypeScript",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -12,7 +12,6 @@
   },
   "files": [
     "dist",
-    "action.yml",
     "README.md",
     "LICENSE"
   ],
@@ -20,7 +19,8 @@
     "node": ">=20"
   },
   "bin": {
-    "code-verifier": "dist/cli.js"
+    "code-verifier": "dist/cli.js",
+    "code-verifier-mcp": "dist/mcp-server.js"
   },
   "scripts": {
     "build": "tsc",

@@ -114,6 +114,12 @@ export function expandTargets(
 async function main() {
   const args = process.argv.slice(2);
 
+  if (args[0] === "mcp") {
+    const { MCPServer } = await import("./mcp-server");
+    new MCPServer(args.includes("--experimental")).start();
+    return;
+  }
+
   if (args.includes("--list-rules")) {
     const rules = [...RULE_REGISTRY.values()].sort((a, b) =>
       a.id.localeCompare(b.id),

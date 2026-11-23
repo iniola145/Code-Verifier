@@ -1151,6 +1151,11 @@ async function runTests() {
     "REL-001",
     "Catch delegated to an explicit mutation error handler is clean",
   );
+  await expectNoFinding(
+    `try { await prevHandle.release(); } catch {\n  // settle safely\n}`,
+    "REL-001",
+    "Empty catch block with explanatory comment is clean",
+  );
   {
     const testCatchResult = await verifier.verifyCode(
       `try { await mutate(); } catch { // expected error from mutation\n}`,
@@ -2274,6 +2279,16 @@ async function runTests() {
       "Central Axios client with timeout is clean",
     );
   }
+  {
+    const result = await verifier.verifyCode(
+      `const res = await page.evaluate(async (url) => { const r = await fetch(url!); return r.text(); }, poisonedUrl);`,
+      "tests/e2e/serviceWorker.e2e.test.ts",
+    );
+    assert(
+      !result.diagnostics.some((d) => d.ruleId === "SERVICE-003"),
+      "E2E/test files are not treated as production API boundaries by SERVICE-003",
+    );
+  }
   await expectFinding(
     `async function login() { const response = await api.post('/login'); const user = response.data; if (import.meta.env.DEV) { UserSchema.safeParse(user); } return user; }`,
     "SERVICE-004",
@@ -3387,10 +3402,12 @@ async function runTests() {
         | Promise<string>;
       declare const fallback: ReactNode | ((props: { x: number }) => ReactNode);
       declare const maybePromise: Promise<boolean> | undefined;
+      declare const definitePromise: Promise<boolean>;
       async function run() {
         if (fallback) console.log('rendering');
         while (fallback) console.log('looping');
-        if (maybePromise) console.log('always truthy when defined');
+        if (maybePromise) console.log('guarding optional promise');
+        if (definitePromise) console.log('always truthy');
       }
     `,
     );
@@ -3404,14 +3421,8 @@ async function runTests() {
     );
     assert(
       reactNodeConditions.length === 1 &&
-        reactNodeConditions[0].codeSnippet === "maybePromise",
-      "Wide UI unions with an ancillary Promise member (React 19 ReactNode) do not trigger TYPE-002, but Promise | undefined still does",
-    );
-    assert(
-      reactNodeResult.diagnostics.some(
-        (d) => d.ruleId === "TYPE-002" && d.codeSnippet === "maybePromise",
-      ),
-      "Promise | undefined conditions still trigger TYPE-002",
+        reactNodeConditions[0].codeSnippet === "definitePromise",
+      "Nullable unions (Promise | undefined) and ReactNode do not trigger TYPE-002, while non-nullable Promise conditions still do",
     );
 
     const mobileRoot = fs.mkdtempSync(

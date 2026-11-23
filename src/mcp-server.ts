@@ -1,24 +1,31 @@
+#!/usr/bin/env node
 import * as fs from "fs";
 import * as path from "path";
 import * as readline from "readline";
 import { CodeVerifier } from "./engine";
 import { LLMFormatter } from "./formatter/llm-formatter";
-import { analyzeRuntimeTraces } from "./runtime/runtime-engine";
-import { parseTraceFile } from "./runtime/trace-parser";
 import { generateTestsForFile } from "./test-gen/generator";
 import { getTestContextForFile } from "./test-gen/test-context";
 import { TestFramework } from "./test-gen/types";
 import { createSession, loadSession, updateSession } from "./tdr/session-manager";
 import { verifyFix } from "./tdr/fix-verifier";
-import { startUITestSession, stopUITestSession, getUITestSession } from "./ui-test/session";
-import { generateBugReport } from "./ui-test/reporter";
 
 /**
  * Lightweight JSON-RPC Model Context Protocol (MCP) Server
- * Exposes 'verify_code' tool to any LLM Agent via stdio.
+ * Exposes Core tools (`verify_code`, `get_test_context`) by default,
+ * and Experimental tools (`generate_tests`, `start_tdr_session`, `verify_fix`, `get_tdr_status`)
+ * when launched with `--experimental`.
  */
-class MCPServer {
+export class MCPServer {
   private verifier = new CodeVerifier();
+  private experimentalEnabled: boolean;
+
+  constructor(experimental?: boolean) {
+    this.experimentalEnabled =
+      experimental ??
+      (process.argv.includes("--experimental") ||
+        process.env.CODE_VERIFIER_EXPERIMENTAL === "1");
+  }
 
   public start(): void {
     const rl = readline.createInterface({
@@ -56,209 +63,155 @@ class MCPServer {
     }
 
     if (method === "tools/list") {
+      const coreTools = [
+        {
+          name: "verify_code",
+          description:
+            "Verifies React, React Native, and Expo TypeScript code using SAST and Abstract Interpretation. Checks for security leaks (AsyncStorage, secrets, XSS in WebViews), React Hook violations (infinite re-render loops, conditional hooks), and null dereferences.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              code: {
+                type: "string",
+                description: "The TypeScript/TSX/JSX source code to verify",
+              },
+              filePath: {
+                type: "string",
+                description:
+                  "Optional filename (e.g. App.tsx, ProfileScreen.tsx)",
+                default: "Component.tsx",
+              },
+              format: {
+                type: "string",
+                enum: ["llm", "json"],
+                description:
+                  "Format of diagnostic output (llm prompt markdown or raw json)",
+                default: "llm",
+              },
+            },
+            required: ["code"],
+          },
+        },
+        {
+          name: "get_test_context",
+          description:
+            "Extracts full architectural context (framework, synthesized mocks, exported contracts, AST endpoints, and latent defect findings) for an LLM to generate robust unit tests.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              filePath: {
+                type: "string",
+                description: "Source file to extract test context for",
+              },
+              code: {
+                type: "string",
+                description: "Optional source code override",
+              },
+            },
+            required: ["filePath"],
+          },
+        },
+      ];
+
+      const experimentalTools = [
+        {
+          name: "generate_tests",
+          description:
+            "[Experimental] Generate test suite from static analysis. Returns test file content.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              filePath: {
+                type: "string",
+                description: "Source file to generate tests for",
+              },
+              code: {
+                type: "string",
+                description:
+                  "Optional source code if not reading from file directly",
+              },
+              framework: {
+                type: "string",
+                enum: ["jest", "vitest", "detox"],
+                description: "Test framework (auto-detected if not specified)",
+              },
+              ruleFilter: {
+                type: "array",
+                items: { type: "string" },
+                description: "Only generate tests for these rule IDs",
+              },
+            },
+            required: ["filePath"],
+          },
+        },
+        {
+          name: "start_tdr_session",
+          description:
+            "[Experimental] Start a TDR session. Returns session ID, static findings, and generated tests.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              sourceFile: {
+                type: "string",
+                description: "Source file to analyze",
+              },
+              framework: {
+                type: "string",
+                enum: ["jest", "vitest", "detox"],
+                description: "Test framework (auto-detected if not specified)",
+              },
+            },
+            required: ["sourceFile"],
+          },
+        },
+        {
+          name: "verify_fix",
+          description:
+            "[Experimental] Verify that a fix resolves a finding. Returns verification result.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              sessionId: {
+                type: "string",
+                description: "TDR session ID",
+              },
+              sourceFile: {
+                type: "string",
+                description: "Source file that was fixed",
+              },
+              runTests: {
+                type: "boolean",
+                description: "Whether to run tests to verify the fix",
+                default: true,
+              },
+              testCommand: {
+                type: "string",
+                description: "Custom test command to execute",
+              },
+            },
+            required: ["sessionId", "sourceFile"],
+          },
+        },
+        {
+          name: "get_tdr_status",
+          description: "[Experimental] Get the status of a TDR session.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              sessionId: {
+                type: "string",
+                description: "TDR session ID",
+              },
+            },
+            required: ["sessionId"],
+          },
+        },
+      ];
+
       this.sendResponse(id, {
-        tools: [
-          {
-            name: "verify_code",
-            description:
-              "Verifies React, React Native, and Expo TypeScript code using SAST and Abstract Interpretation. Checks for security leaks (AsyncStorage, secrets, XSS in WebViews), React Hook violations (infinite re-render loops, conditional hooks), and null dereferences.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                code: {
-                  type: "string",
-                  description: "The TypeScript/TSX/JSX source code to verify",
-                },
-                filePath: {
-                  type: "string",
-                  description:
-                    "Optional filename (e.g. App.tsx, ProfileScreen.tsx)",
-                  default: "Component.tsx",
-                },
-                format: {
-                  type: "string",
-                  enum: ["llm", "json"],
-                  description:
-                    "Format of diagnostic output (llm prompt markdown or raw json)",
-                  default: "llm",
-                },
-              },
-              required: ["code"],
-            },
-          },
-          {
-            name: "generate_tests",
-            description:
-              "Generate test suite from static analysis. Returns test file content.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                filePath: {
-                  type: "string",
-                  description: "Source file to generate tests for",
-                },
-                code: {
-                  type: "string",
-                  description:
-                    "Optional source code if not reading from file directly",
-                },
-                framework: {
-                  type: "string",
-                  enum: ["jest", "vitest", "detox"],
-                  description: "Test framework (auto-detected if not specified)",
-                },
-                ruleFilter: {
-                  type: "array",
-                  items: { type: "string" },
-                  description: "Only generate tests for these rule IDs",
-                },
-              },
-              required: ["filePath"],
-            },
-          },
-          {
-            name: "get_test_context",
-            description:
-              "Extracts full architectural context (framework, synthesized mocks, exported contracts, AST endpoints, and latent defect findings) for an LLM to generate robust unit tests.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                filePath: {
-                  type: "string",
-                  description: "Source file to extract test context for",
-                },
-                code: {
-                  type: "string",
-                  description: "Optional source code override",
-                },
-              },
-              required: ["filePath"],
-            },
-          },
-          {
-            name: "get_runtime_findings",
-            description:
-              "Get runtime findings from a trace file. Returns confirmed bugs with evidence.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                traceFile: {
-                  type: "string",
-                  description: "Path to JSONL trace file",
-                },
-                staticResultsFile: {
-                  type: "string",
-                  description:
-                    "Optional path to static analysis results JSON",
-                },
-              },
-              required: ["traceFile"],
-            },
-          },
-          {
-            name: "start_tdr_session",
-            description:
-              "Start a TDR session. Returns session ID, static findings, and generated tests.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                sourceFile: {
-                  type: "string",
-                  description: "Source file to analyze",
-                },
-                framework: {
-                  type: "string",
-                  enum: ["jest", "vitest", "detox"],
-                  description: "Test framework (auto-detected if not specified)",
-                },
-              },
-              required: ["sourceFile"],
-            },
-          },
-          {
-            name: "verify_fix",
-            description:
-              "Verify that a fix resolves a finding. Returns verification result.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                sessionId: {
-                  type: "string",
-                  description: "TDR session ID",
-                },
-                sourceFile: {
-                  type: "string",
-                  description: "Source file that was fixed",
-                },
-                runTests: {
-                  type: "boolean",
-                  description: "Whether to run tests to verify the fix",
-                  default: true,
-                },
-                testCommand: {
-                  type: "string",
-                  description: "Custom test command to execute",
-                },
-              },
-              required: ["sessionId", "sourceFile"],
-            },
-          },
-          {
-            name: "get_tdr_status",
-            description: "Get the status of a TDR session.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                sessionId: {
-                  type: "string",
-                  description: "TDR session ID",
-                },
-              },
-              required: ["sessionId"],
-            },
-          },
-          {
-            name: "start_ui_session",
-            description:
-              "Start a UI test session. Returns session ID and initial state.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                target: {
-                  type: "string",
-                  description: "Target app to test",
-                },
-                framework: {
-                  type: "string",
-                  enum: ["playwright", "detox"],
-                  description: "UI testing framework",
-                  default: "playwright",
-                },
-                flows: {
-                  type: "array",
-                  items: { type: "string" },
-                  description: "User flows to test",
-                },
-              },
-              required: ["target"],
-            },
-          },
-          {
-            name: "stop_ui_session",
-            description:
-              "Stop a UI test session and return the bug report.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                sessionId: {
-                  type: "string",
-                  description: "UI test session ID",
-                },
-              },
-              required: ["sessionId"],
-            },
-          },
-        ],
+        tools: this.experimentalEnabled
+          ? [...coreTools, ...experimentalTools]
+          : coreTools,
       });
       return;
     }
@@ -302,7 +255,7 @@ class MCPServer {
         return;
       }
 
-      if (toolName === "generate_tests") {
+      if (toolName === "generate_tests" && this.experimentalEnabled) {
         const filePath = args.filePath || "Component.tsx";
         const framework = args.framework as TestFramework | undefined;
         const ruleFilter = args.ruleFilter;
@@ -372,43 +325,7 @@ class MCPServer {
         return;
       }
 
-      if (toolName === "get_runtime_findings") {
-        const traceFile = args.traceFile;
-        const staticResultsFile = args.staticResultsFile;
-
-        try {
-          const traces = parseTraceFile(traceFile);
-          const staticFindings =
-            staticResultsFile && fs.existsSync(staticResultsFile)
-              ? JSON.parse(fs.readFileSync(staticResultsFile, "utf-8"))
-              : undefined;
-
-          const findings = analyzeRuntimeTraces(traces, staticFindings);
-
-          this.sendResponse(id, {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(findings, null, 2),
-              },
-            ],
-            isError: false,
-          });
-        } catch (err: any) {
-          this.sendResponse(id, {
-            content: [
-              {
-                type: "text",
-                text: `Runtime analysis error: ${err.message}`,
-              },
-            ],
-            isError: true,
-          });
-        }
-        return;
-      }
-
-      if (toolName === "start_tdr_session") {
+      if (toolName === "start_tdr_session" && this.experimentalEnabled) {
         const sourceFile = args.sourceFile;
         const framework = args.framework;
 
@@ -462,7 +379,7 @@ class MCPServer {
         return;
       }
 
-      if (toolName === "verify_fix") {
+      if (toolName === "verify_fix" && this.experimentalEnabled) {
         const sessionId = args.sessionId;
         const sourceFile = args.sourceFile;
         const runTests = args.runTests;
@@ -543,7 +460,7 @@ class MCPServer {
         return;
       }
 
-      if (toolName === "get_tdr_status") {
+      if (toolName === "get_tdr_status" && this.experimentalEnabled) {
         const sessionId = args.sessionId;
 
         try {
@@ -587,91 +504,6 @@ class MCPServer {
         return;
       }
 
-      if (toolName === "start_ui_session") {
-        const { target, framework, flows } = args;
-
-        try {
-          if (!target) {
-            throw new Error("target is required");
-          }
-
-          const session = await startUITestSession({
-            framework: framework as "playwright" | "detox",
-            target,
-            flows,
-          });
-
-          this.sendResponse(id, {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(
-                  {
-                    sessionId: session.id,
-                    status: session.status,
-                    steps: session.steps.length,
-                    bugs: session.bugs.length,
-                  },
-                  null,
-                  2,
-                ),
-              },
-            ],
-            isError: false,
-          });
-        } catch (err: any) {
-          this.sendResponse(id, {
-            content: [
-              {
-                type: "text",
-                text: `Error starting UI session: ${err.message}`,
-              },
-            ],
-            isError: true,
-          });
-        }
-        return;
-      }
-
-      if (toolName === "stop_ui_session") {
-        const { sessionId } = args;
-
-        try {
-          if (!sessionId) {
-            throw new Error("sessionId is required");
-          }
-
-          await stopUITestSession(sessionId);
-          const session = getUITestSession(sessionId);
-
-          if (!session) {
-            this.sendResponse(id, {
-              content: [{ type: "text", text: "Session not found" }],
-              isError: true,
-            });
-            return;
-          }
-
-          const report = generateBugReport(session);
-
-          this.sendResponse(id, {
-            content: [{ type: "text", text: report }],
-            isError: session.bugs.length > 0,
-          });
-        } catch (err: any) {
-          this.sendResponse(id, {
-            content: [
-              {
-                type: "text",
-                text: `Error stopping UI session: ${err.message}`,
-              },
-            ],
-            isError: true,
-          });
-        }
-        return;
-      }
-
       this.sendError(id, -32601, `Tool not found: ${toolName}`);
       return;
     }
@@ -706,4 +538,6 @@ class MCPServer {
   }
 }
 
-new MCPServer().start();
+if (require.main === module) {
+  new MCPServer().start();
+}

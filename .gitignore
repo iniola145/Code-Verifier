@@ -1,2 +1,4 @@
 node_modules
 dist
+.verifier/
+.codeverifier-cache.json

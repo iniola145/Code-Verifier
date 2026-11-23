@@ -16,6 +16,7 @@ export class SemanticAnalysisIndex {
       jsx: ts.JsxEmit.Preserve,
       allowJs: true,
       checkJs: false,
+      strictNullChecks: true,
       noEmit: true,
       skipLibCheck: true,
     });
@@ -92,23 +93,13 @@ export class SemanticAnalysisIndex {
     )
       return false;
     if (!type.isUnion()) return this.isThenableType(type, node);
-    // A broad UI union can carry an ancillary Promise member (React 19's
-    // ReactNode includes Promise<AwaitedReactNode>), which must not make every
-    // truthiness check on it look like a Promise check. Only treat the type as
-    // Promise-like when every non-nullish member is thenable, so
-    // `Promise<X> | undefined` still flags but ReactNode does not.
-    const members = type.types.filter(
-      (member) =>
-        !(
-          member.flags &
-          (ts.TypeFlags.Null |
-            ts.TypeFlags.Undefined |
-            ts.TypeFlags.Void |
-            ts.TypeFlags.Never)
-        ),
-    );
+    // Truthiness checks on nullable unions (`Promise<T> | null | undefined`)
+    // guard whether an optional/in-flight Promise exists before awaiting it,
+    // and broad UI unions (e.g. ReactNode) include ancillary Promise members.
+    // Only flag a union when every member is thenable.
     return (
-      members.length > 0 && members.every((m) => this.isThenableType(m, node))
+      type.types.length > 0 &&
+      type.types.every((m) => this.isThenableType(m, node))
     );
   }
 
