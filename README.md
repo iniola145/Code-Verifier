@@ -83,6 +83,23 @@ Launch with `npx -y code-verifier mcp --experimental` to enable beta workflows:
 
 ---
 
+## Supported Languages & Frameworks
+
+### Languages
+- **TypeScript & TSX** (`.ts`, `.tsx`) — full AST rules, abstract interpretation, and compiler-backed TypeScript semantic checks (`TYPE-001`, `TYPE-002`).
+- **JavaScript & JSX** (`.js`, `.jsx`, `.mjs`, `.cjs`) — Babel AST rules and abstract interpretation.
+- **Config / Manifest Formats** — Expo `app.json`, `AndroidManifest.xml`, `Info.plist`, `Podfile.lock`, Dockerfiles, GitHub Actions YAML, Kubernetes YAML, and Terraform `.tf`.
+
+### Frameworks & Libraries
+- **React** (including **React 19** migration, hook rules, render-phase ref checks, and Fast Refresh rules)
+- **React Native & Expo** (AsyncStorage, WebView security, `FlatList`, `Animated`, `PanResponder`, Expo Router, `Podfile.lock` native autolinking, and Android/iOS mobile config)
+- **TanStack Query / React Query** (query keys, infinite pagination, cache invalidation, mutation idempotency)
+- **HTTP & Validation** (`fetch`, `axios`, Zod-style schema validation)
+- **Node / Web Backend APIs** (Express-style route auth, SQL/command/path/SSRF injection, JWT verification, cookies, CORS, error leakage)
+- **Testing Frameworks** (**Jest**, **Vitest**, **Detox**, and React Testing Library)
+
+---
+
 ## Rule Categories Summary
 
 Code Verifier ships **128** registry rules (plus project-wide `HYG-004` dead-file detection). See [docs/RULES.md](docs/RULES.md) for the complete rule table, or run `npx code-verifier --list-rules`.
@@ -128,6 +145,8 @@ await AsyncStorage.setItem("cache_blob", blob);
 
 Also available: `// code-verifier-disable` (this + next line) and `// code-verifier-disable-file`.
 
+Hit a false positive? [Open a false-positive report](https://github.com/iniola145/Code-Verifier/issues/new/choose) with the rule ID and a minimal snippet.
+
 ---
 
 ## How It Works & Honest Limitations
@@ -164,4 +183,4 @@ npm run benchmark # Precision/recall regression gate (>= 95%)
 
 ## Frontend AI Harness (Waitlist)
 
-Building deterministic verification and test harnesses for AI frontend teams — **[Join the Frontend AI Harness waitlist →](#waitlist-link-placeholder)**
+Building deterministic verification and test harnesses for AI frontend teams — **[Join the Frontend AI Harness waitlist →](https://docs.google.com/forms/d/e/1FAIpQLSflAHMBO7ER6ERwb5BWAkkS1iXk6HxXnlfpRe4J89Gq7ZDsYQ/viewform?usp=publish-editor)**
